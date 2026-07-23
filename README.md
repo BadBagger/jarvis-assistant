@@ -93,6 +93,16 @@ src-tauri/src/lib.rs        Rust commands: app_data_dir, read/write_text_file,
                             local HTTP), ollama_chat (streaming chat/vision).
 ```
 
+## Known setup gotchas
+
+- **AUTOMATIC1111 WebUI on newer NVIDIA GPUs (e.g. RTX 5080/50-series):**
+  the WebUI's pinned `Stability-AI/stablediffusion` dependency has gone
+  missing upstream, and the default bundled PyTorch build doesn't support
+  the newest CUDA-capable cards. Fix: point the dependency at a mirrored
+  fork of that repo, and upgrade PyTorch to a CUDA 12.8 build. See
+  [AUTOMATIC1111/stable-diffusion-webui#17204](https://github.com/AUTOMATIC1111/stable-diffusion-webui/issues/17204)
+  for the specifics.
+
 ## Known limitations
 
 - Chat history is in-memory only (cleared on restart) — no persisted
