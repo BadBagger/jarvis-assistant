@@ -1,0 +1,35 @@
+# Copy this file to config.yaml and adjust before running train.py.
+# config.yaml is gitignored -- it's yours, not a shared default.
+
+# Any ungated instruct model on Hugging Face works. Qwen2.5 is a solid
+# default: permissively licensed, no access request needed. Drop to the 3B
+# variant if you have less than ~12GB VRAM.
+base_model: "Qwen/Qwen2.5-7B-Instruct"
+output_dir: "./output/jarvis-lora"
+
+data:
+  # Produced by prepare_data.py from your raw conversations file -- see
+  # data/example_conversations.jsonl for the expected input format.
+  train_file: "./data/train.jsonl"
+  val_file: "./data/val.jsonl" # optional; leave empty ("") to skip validation
+  max_seq_length: 2048
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+training:
+  num_train_epochs: 3
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 8
+  learning_rate: 2.0e-4
+  warmup_ratio: 0.03
+  logging_steps: 10
+  save_steps: 100
+  bf16: true # set to false + fp16: true if your GPU doesn't support bf16 (pre-Ampere NVIDIA)
+  fp16: false
+
+quantization:
+  load_in_4bit: true # QLoRA -- set false for full-precision LoRA if you have VRAM to spare

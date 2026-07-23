@@ -1,0 +1,12 @@
+# Fine-tuning stack -- install into its own virtualenv/conda env on a
+# machine with an NVIDIA GPU (8GB+ VRAM for a 3B model with QLoRA, 12GB+ for
+# 7B). CPU-only training works but is impractically slow for anything past a
+# toy run.
+torch>=2.3
+transformers>=4.44
+peft>=0.12
+bitsandbytes>=0.43
+trl>=0.9
+datasets>=2.20
+accelerate>=0.33
+pyyaml>=6.0

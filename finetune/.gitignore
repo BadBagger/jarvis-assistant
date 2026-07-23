@@ -1,0 +1,7 @@
+config.yaml
+data/train.jsonl
+data/val.jsonl
+data/*.raw.jsonl
+output/
+*.gguf
+__pycache__/

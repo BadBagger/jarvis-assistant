@@ -59,6 +59,16 @@ npm run tauri build  # full desktop app build
 `cargo check` inside `src-tauri/` type-checks the Rust backend
 independently.
 
+## Fine-tuning your own chat model
+
+The app talks to whatever model Ollama serves under a given name — including
+a model you've actually trained yourself. See `finetune/README.md` for a
+full LoRA/QLoRA fine-tuning pipeline: prepare your own conversation data,
+train a real custom adapter on an open base model, merge it, convert to
+GGUF, and register it with Ollama. Then just point Settings → Chat model at
+your new model's name. Needs a real GPU on your own machine; doesn't run in
+a cloud sandbox.
+
 ## Project layout
 
 ```
@@ -90,7 +100,6 @@ src-tauri/src/lib.rs        Rust commands: app_data_dir, read/write_text_file,
 - Image generation uses AUTOMATIC1111/A1111-API-compatible servers only;
   a ComfyUI setup needs its own API-compatibility shim or a dedicated
   ComfyUI client to work here.
-- This is a real but modest local orchestration app, not a from-scratch
-  trained model — "Jarvis"-style behavior comes from combining Ollama (LLM
-  chat + vision) and a local image generator, not from one custom-trained
-  model.
+- The base app orchestrates existing local models rather than training one;
+  see `finetune/` if you want an actually-trained, custom-tuned chat model
+  instead of an off-the-shelf one.
