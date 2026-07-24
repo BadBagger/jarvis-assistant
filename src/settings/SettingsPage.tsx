@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { checkBackendHealth, type HealthCheckResult } from "../shared/health";
 import { saveSettings } from "../shared/persistence";
 import type { Settings } from "../shared/types";
+import { buildModelRegistry } from "../models/registry";
+import type { ModelCapability, ModelDescriptor } from "../models/types";
 import {
   createToolExecutionContext,
   jarvisToolRegistry,
@@ -27,6 +29,7 @@ export function SettingsPage({ settings, onSaved }: Props) {
   const [auditRecords, setAuditRecords] = useState<ToolAuditRecord[]>([]);
 
   const tools = useMemo(() => jarvisToolRegistry.list(), []);
+  const modelRegistry = useMemo(() => buildModelRegistry(draft), [draft]);
   const generatedCounts = useMemo(() => {
     return outputEntries.reduce(
       (counts, entry) => {
@@ -121,6 +124,33 @@ export function SettingsPage({ settings, onSaved }: Props) {
     return ms ? new Date(ms).toLocaleString() : "";
   }
 
+  function healthForModel(model: ModelDescriptor): HealthCheckResult | undefined {
+    const healthId = model.provider === "automatic1111" ? "imageGen" : model.provider;
+    return healthChecks.find((check) => check.id === healthId);
+  }
+
+  function modelStatus(model: ModelDescriptor) {
+    if (!model.enabled) return "Not configured";
+    const health = healthForModel(model);
+    if (!health) return "Configured";
+    return health.ok ? "Healthy" : "Needs attention";
+  }
+
+  function capabilityLabel(capability: ModelCapability) {
+    switch (capability) {
+      case "image-generation":
+        return "image generation";
+      case "long-context":
+        return "long context";
+      case "local-only":
+        return "local only";
+      case "requires-network":
+        return "requires network";
+      default:
+        return capability;
+    }
+  }
+
   return (
     <div className="settings-page">
       <div className="settings-shell">
@@ -194,6 +224,39 @@ export function SettingsPage({ settings, onSaved }: Props) {
             </label>
           </div>
           {status && <p className="settings-status">{status}</p>}
+        </section>
+
+        <section className="settings-panel settings-panel--wide">
+          <div className="settings-panel__header">
+            <div>
+              <p className="settings-kicker">Capabilities</p>
+              <h2>Model routes</h2>
+            </div>
+          </div>
+          <div className="model-route-grid">
+            {modelRegistry.models.map((model) => {
+              const health = healthForModel(model);
+              return (
+                <article key={model.id} className="model-route-card">
+                  <div className="model-route-card__header">
+                    <div>
+                      <h3>{model.label}</h3>
+                      <p>{model.provider} - {model.privacyLevel} - {model.requiresNetwork ? "network required" : "local endpoint"}</p>
+                    </div>
+                    <span className={model.enabled && health?.ok ? "model-route-status model-route-status--ok" : "model-route-status"}>
+                      {modelStatus(model)}
+                    </span>
+                  </div>
+                  <div className="model-capability-list">
+                    {model.capabilities.map((capability) => (
+                      <span key={capability}>{capabilityLabel(capability)}</span>
+                    ))}
+                  </div>
+                  {health && <p className="model-route-health">{health.message}</p>}
+                </article>
+              );
+            })}
+          </div>
         </section>
 
         <section className="settings-panel">

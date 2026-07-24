@@ -1,8 +1,18 @@
-export type ModelProviderKind = "ollama" | "automatic1111" | "cloud";
+export type ModelProviderKind = "ollama" | "automatic1111" | "openai" | "cloud";
 
-export type ModelCapability = "chat" | "coding" | "vision" | "image-generation" | "embeddings" | "long-context";
+export type ModelCapability =
+  | "chat"
+  | "coding"
+  | "vision"
+  | "image-generation"
+  | "embeddings"
+  | "long-context"
+  | "local-only"
+  | "requires-network";
 
 export type ModelRouteUseCase = "chat" | "coding" | "vision" | "image-generation" | "embeddings" | "long-context";
+
+export type ModelPrivacyLevel = "local-only" | "private-network" | "cloud";
 
 export interface ModelDescriptor {
   id: string;
@@ -13,6 +23,8 @@ export interface ModelDescriptor {
   capabilities: ModelCapability[];
   contextWindowTokens?: number;
   local: boolean;
+  requiresNetwork: boolean;
+  privacyLevel: ModelPrivacyLevel;
   enabled: boolean;
 }
 

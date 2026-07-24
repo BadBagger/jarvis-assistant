@@ -32,6 +32,8 @@ export function buildModelRegistry(settings: Settings): ModelRegistry {
         capabilities: capabilitiesForOllamaModel(settings.chatModel, ["chat"]),
         contextWindowTokens: estimateContextWindow(settings.chatModel, DEFAULT_CHAT_CONTEXT_WINDOW),
         local: true,
+        requiresNetwork: false,
+        privacyLevel: "local-only",
         enabled: Boolean(ollamaBaseUrl && settings.chatModel.trim()),
       },
       {
@@ -43,6 +45,8 @@ export function buildModelRegistry(settings: Settings): ModelRegistry {
         capabilities: capabilitiesForOllamaModel(settings.visionModel, ["chat", "vision"]),
         contextWindowTokens: estimateContextWindow(settings.visionModel, DEFAULT_VISION_CONTEXT_WINDOW),
         local: true,
+        requiresNetwork: false,
+        privacyLevel: "local-only",
         enabled: Boolean(ollamaBaseUrl && settings.visionModel.trim()),
       },
       {
@@ -50,8 +54,10 @@ export function buildModelRegistry(settings: Settings): ModelRegistry {
         provider: "automatic1111",
         label: "Stable Diffusion WebUI image generation",
         baseUrl: imageGenBaseUrl,
-        capabilities: ["image-generation"],
+        capabilities: withOperationalCapabilities(["image-generation"], { local: true, requiresNetwork: false }),
         local: true,
+        requiresNetwork: false,
+        privacyLevel: "local-only",
         enabled: Boolean(imageGenBaseUrl),
       },
     ],
@@ -60,12 +66,14 @@ export function buildModelRegistry(settings: Settings): ModelRegistry {
 
 export function selectModelForUseCase(registry: ModelRegistry, useCase: ModelRouteUseCase): ModelDescriptor {
   const requiredCapabilities = useCaseCapabilities[useCase];
-  const match = registry.models.find(
-    (model) => model.enabled && requiredCapabilities.every((capability) => model.capabilities.includes(capability)),
-  );
+  const enabledModels = registry.models.filter((model) => model.enabled);
+  const match = enabledModels.find((model) => requiredCapabilities.every((capability) => model.capabilities.includes(capability)));
 
   if (!match) {
-    throw new Error(`No enabled model is registered for ${useCase}. Check Settings and model provider configuration.`);
+    if (enabledModels.length > 0) {
+      throw new UnsupportedModelCapabilityError(useCase, requiredCapabilities, enabledModels);
+    }
+    throw new ModelRouteUnavailableError(useCase);
   }
 
   return match;
@@ -91,11 +99,11 @@ function capabilitiesForOllamaModel(modelName: string, baseline: ModelCapability
     capabilities.add("embeddings");
   }
 
-  if (/(128k|200k|1m|long|llama3\.1|qwen2\.5|qwen3|gemini|claude)/.test(normalized)) {
+  if (/(16k|32k|128k|200k|1m|long|llama3\.1|qwen2\.5|qwen3|gemini|claude)/.test(normalized)) {
     capabilities.add("long-context");
   }
 
-  return [...capabilities];
+  return withOperationalCapabilities([...capabilities], { local: true, requiresNetwork: false });
 }
 
 function estimateContextWindow(modelName: string, fallback: number): number {
@@ -106,4 +114,42 @@ function estimateContextWindow(modelName: string, fallback: number): number {
   if (/32k/.test(normalized)) return 32_768;
   if (/16k/.test(normalized)) return 16_384;
   return fallback;
+}
+
+function withOperationalCapabilities(
+  capabilities: ModelCapability[],
+  options: { local: boolean; requiresNetwork: boolean },
+): ModelCapability[] {
+  const expanded = new Set<ModelCapability>(capabilities);
+  if (options.local) expanded.add("local-only");
+  if (options.requiresNetwork) expanded.add("requires-network");
+  return [...expanded];
+}
+
+export class ModelRouteUnavailableError extends Error {
+  readonly useCase: ModelRouteUseCase;
+
+  constructor(useCase: ModelRouteUseCase) {
+    super(`No enabled model is registered for ${useCase}. Check Settings and model provider configuration.`);
+    this.name = "ModelRouteUnavailableError";
+    this.useCase = useCase;
+  }
+}
+
+export class UnsupportedModelCapabilityError extends Error {
+  readonly useCase: ModelRouteUseCase;
+  readonly requiredCapabilities: ModelCapability[];
+  readonly enabledModelIds: string[];
+
+  constructor(useCase: ModelRouteUseCase, requiredCapabilities: ModelCapability[], enabledModels: ModelDescriptor[]) {
+    super(
+      `No enabled model supports ${useCase}. Required capabilities: ${requiredCapabilities.join(", ")}. Enabled models: ${
+        enabledModels.map((model) => model.id).join(", ") || "none"
+      }.`,
+    );
+    this.name = "UnsupportedModelCapabilityError";
+    this.useCase = useCase;
+    this.requiredCapabilities = requiredCapabilities;
+    this.enabledModelIds = enabledModels.map((model) => model.id);
+  }
 }
