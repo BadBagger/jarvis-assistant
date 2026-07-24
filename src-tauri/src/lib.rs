@@ -12,9 +12,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tauri::{Emitter, Manager};
+use tauri_plugin_opener::OpenerExt;
 
 fn parse_local_http_url(label: &str, value: &str) -> Result<Url, String> {
     let parsed = Url::parse(value.trim()).map_err(|e| format!("{label} must be a valid URL: {e}"))?;
@@ -81,6 +82,149 @@ fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| format!("failed to create dir for {path}: {e}"))?;
     }
     fs::write(&p, bytes).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
+const ARTIFACT_EXTENSIONS: &[&str] = &["md", "txt", "json", "docx", "png", "jpg", "jpeg", "webp", "pdf"];
+
+fn validate_output_dir_path(output_dir: &str) -> Result<PathBuf, String> {
+    let trimmed = output_dir.trim();
+    if trimmed.is_empty() {
+        return Err("output folder is required".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("output folder contains an invalid null byte".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.is_absolute() {
+        return Err("output folder must be an absolute path".to_string());
+    }
+    if path.components().any(|component| matches!(component, Component::ParentDir)) {
+        return Err("output folder must not contain '..' segments".to_string());
+    }
+    Ok(path)
+}
+
+fn validate_artifact_file_name(file_name: &str) -> Result<String, String> {
+    let trimmed = file_name.trim();
+    if trimmed.is_empty() {
+        return Err("artifact file name is required".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("artifact file name contains an invalid null byte".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("artifact file name must not contain path separators".to_string());
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.contains("..") {
+        return Err("artifact file name must not contain traversal segments".to_string());
+    }
+    if trimmed
+        .chars()
+        .any(|ch| ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+    {
+        return Err("artifact file name contains characters that are unsafe on Windows".to_string());
+    }
+
+    let path = Path::new(trimmed);
+    if path.file_name().and_then(|name| name.to_str()) != Some(trimmed) {
+        return Err("artifact file name must be a plain file name".to_string());
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .ok_or_else(|| "artifact file name must include a supported extension".to_string())?;
+    if !ARTIFACT_EXTENSIONS.contains(&extension.as_str()) {
+        return Err(format!("unsupported artifact extension: {extension}"));
+    }
+
+    Ok(trimmed.to_string())
+}
+
+fn artifact_path(output_dir: &str, file_name: &str) -> Result<PathBuf, String> {
+    let output = validate_output_dir_path(output_dir)?;
+    let safe_name = validate_artifact_file_name(file_name)?;
+    Ok(output.join(safe_name))
+}
+
+fn validate_existing_artifact_path(output_dir: &str, artifact_path_value: &str) -> Result<PathBuf, String> {
+    let output = validate_output_dir_path(output_dir)?;
+    let artifact = PathBuf::from(artifact_path_value.trim());
+    if !artifact.is_absolute() {
+        return Err("artifact path must be absolute".to_string());
+    }
+    if artifact.components().any(|component| matches!(component, Component::ParentDir)) {
+        return Err("artifact path must not contain '..' segments".to_string());
+    }
+    if !artifact.exists() {
+        return Err("artifact does not exist".to_string());
+    }
+
+    let output_canon = output
+        .canonicalize()
+        .map_err(|e| format!("failed to validate output folder: {e}"))?;
+    let artifact_canon = artifact
+        .canonicalize()
+        .map_err(|e| format!("failed to validate artifact path: {e}"))?;
+    if !artifact_canon.starts_with(&output_canon) {
+        return Err("artifact path is outside the configured output folder".to_string());
+    }
+    Ok(artifact_canon)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedArtifact {
+    path: String,
+    size_bytes: u64,
+}
+
+#[tauri::command]
+fn validate_output_folder(output_dir: String) -> Result<String, String> {
+    let output = validate_output_dir_path(&output_dir)?;
+    fs::create_dir_all(&output).map_err(|e| format!("failed to create output folder: {e}"))?;
+    Ok(output.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_artifact_text(output_dir: String, file_name: String, contents: String) -> Result<SavedArtifact, String> {
+    let path = artifact_path(&output_dir, &file_name)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("failed to create output folder: {e}"))?;
+    }
+    fs::write(&path, contents.as_bytes()).map_err(|e| format!("failed to write artifact: {e}"))?;
+    let size_bytes = fs::metadata(&path).map_err(|e| format!("failed to read saved artifact metadata: {e}"))?.len();
+    Ok(SavedArtifact {
+        path: path.to_string_lossy().to_string(),
+        size_bytes,
+    })
+}
+
+#[tauri::command]
+fn save_artifact_binary(output_dir: String, file_name: String, base64_data: String) -> Result<SavedArtifact, String> {
+    let path = artifact_path(&output_dir, &file_name)?;
+    let bytes = STANDARD
+        .decode(base64_data)
+        .map_err(|e| format!("invalid base64 data: {e}"))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("failed to create output folder: {e}"))?;
+    }
+    fs::write(&path, bytes).map_err(|e| format!("failed to write artifact: {e}"))?;
+    let size_bytes = fs::metadata(&path).map_err(|e| format!("failed to read saved artifact metadata: {e}"))?.len();
+    Ok(SavedArtifact {
+        path: path.to_string_lossy().to_string(),
+        size_bytes,
+    })
+}
+
+#[tauri::command]
+fn reveal_artifact_in_folder(app: tauri::AppHandle, output_dir: String, artifact_path_value: String) -> Result<(), String> {
+    let artifact = validate_existing_artifact_path(&output_dir, &artifact_path_value)?;
+    app.opener()
+        .reveal_item_in_dir(artifact)
+        .map_err(|e| format!("failed to open artifact folder: {e}"))
 }
 
 #[derive(Serialize)]
@@ -339,7 +483,7 @@ async fn ollama_chat(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_local_http_url;
+    use super::{artifact_path, parse_local_http_url, validate_artifact_file_name, validate_output_dir_path};
 
     #[test]
     fn accepts_local_service_urls() {
@@ -355,6 +499,31 @@ mod tests {
         assert!(parse_local_http_url("URL", "http://192.168.1.10:11434").is_err());
         assert!(parse_local_http_url("URL", "file:///tmp/model").is_err());
     }
+
+    #[test]
+    fn validates_output_folders() {
+        assert!(validate_output_dir_path("C:/Users/KyleB/Jarvis/outputs").is_ok());
+        assert!(validate_output_dir_path("Jarvis/outputs").is_err());
+        assert!(validate_output_dir_path("C:/Users/KyleB/../Secrets").is_err());
+        assert!(validate_output_dir_path("").is_err());
+    }
+
+    #[test]
+    fn validates_artifact_file_names() {
+        assert!(validate_artifact_file_name("jarvis-note.md").is_ok());
+        assert!(validate_artifact_file_name("jarvis-data.json").is_ok());
+        assert!(validate_artifact_file_name("../secret.md").is_err());
+        assert!(validate_artifact_file_name("nested/file.txt").is_err());
+        assert!(validate_artifact_file_name("bad:name.txt").is_err());
+        assert!(validate_artifact_file_name("script.exe").is_err());
+    }
+
+    #[test]
+    fn builds_artifact_paths_only_inside_output_folder() {
+        let path = artifact_path("C:/Users/KyleB/Jarvis/outputs", "summary.txt").expect("safe artifact path");
+        assert!(path.ends_with("summary.txt"));
+        assert!(artifact_path("C:/Users/KyleB/Jarvis/outputs", "../summary.txt").is_err());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -367,6 +536,10 @@ pub fn run() {
             write_text_file,
             write_binary_file,
             list_directory,
+            validate_output_folder,
+            save_artifact_text,
+            save_artifact_binary,
+            reveal_artifact_in_folder,
             http_get,
             http_post,
             ollama_chat,

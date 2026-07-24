@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { artifactRepository } from "../artifacts/store";
+import type { ArtifactKind, ArtifactRecord } from "../artifacts/types";
 import { buildDocxBase64 } from "../documents/generateDocx";
 import { memoryRepository } from "../memory/store";
 import { createModelRouter } from "../models/router";
@@ -75,6 +76,8 @@ export function ChatPage({ settings }: Props) {
       content: request.kind === "image-gen" ? request.prompt : "",
       generatedImageBase64: undefined,
       savedTo: undefined,
+      savedArtifactPath: undefined,
+      savedArtifactFileName: undefined,
     });
 
     if (request.kind === "text") {
@@ -235,12 +238,55 @@ export function ChatPage({ settings }: Props) {
     }
   }
 
+  function markSaved(messageId: string, record: ArtifactRecord) {
+    updateMessage(messageId, {
+      savedTo: record.path,
+      savedArtifactPath: record.path,
+      savedArtifactFileName: record.fileName,
+    });
+  }
+
+  async function handleSaveTextArtifact(message: ChatMessage, kind: Extract<ArtifactKind, "markdown" | "text" | "json">) {
+    try {
+      const contents =
+        kind === "json"
+          ? JSON.stringify(
+              {
+                type: "assistant-message",
+                createdAt: new Date().toISOString(),
+                content: message.content,
+              },
+              null,
+              2,
+            )
+          : message.content;
+      const record = await artifactRepository.saveTextArtifact({
+        outputDir: settings.outputDir,
+        kind,
+        title: kind === "markdown" ? "Jarvis markdown" : kind === "json" ? "Jarvis JSON" : "Jarvis text",
+        contents,
+        source: "assistant-message",
+        messageId: message.id,
+      });
+      markSaved(message.id, record);
+    } catch (err) {
+      updateMessage(message.id, { savedTo: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
   async function handleSaveDocument(message: ChatMessage) {
     try {
       const base64 = await buildDocxBase64("Jarvis note", message.content);
-      const path = `${settings.outputDir}/jarvis-note-${Date.now()}.docx`;
-      await invoke("write_binary_file", { path, base64Data: base64 });
-      updateMessage(message.id, { savedTo: path });
+      const record = await artifactRepository.saveBinaryArtifact({
+        outputDir: settings.outputDir,
+        kind: "document",
+        format: "docx",
+        title: "Jarvis note",
+        base64Data: base64,
+        source: "assistant-message",
+        messageId: message.id,
+      });
+      markSaved(message.id, record);
     } catch (err) {
       updateMessage(message.id, { savedTo: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
     }
@@ -249,11 +295,31 @@ export function ChatPage({ settings }: Props) {
   async function handleSaveImage(message: ChatMessage) {
     if (!message.generatedImageBase64) return;
     try {
-      const path = `${settings.outputDir}/jarvis-image-${Date.now()}.png`;
-      await invoke("write_binary_file", { path, base64Data: message.generatedImageBase64 });
-      updateMessage(message.id, { savedTo: path });
+      const record = await artifactRepository.saveBinaryArtifact({
+        outputDir: settings.outputDir,
+        kind: "image",
+        format: "png",
+        title: "Jarvis image",
+        base64Data: message.generatedImageBase64,
+        source: "image-generation",
+        messageId: message.id,
+        prompt: message.content,
+      });
+      markSaved(message.id, record);
     } catch (err) {
       updateMessage(message.id, { savedTo: `Save failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+
+  async function handleOpenSavedArtifact(message: ChatMessage) {
+    if (!message.savedArtifactPath || !message.savedArtifactFileName) return;
+    try {
+      await artifactRepository.revealInFolder(settings.outputDir, {
+        path: message.savedArtifactPath,
+        fileName: message.savedArtifactFileName,
+      });
+    } catch (err) {
+      updateMessage(message.id, { savedTo: `Open failed: ${err instanceof Error ? err.message : String(err)}` });
     }
   }
 
@@ -277,16 +343,36 @@ export function ChatPage({ settings }: Props) {
               {m.pending && <span className="chat-message__cursor">|</span>}
             </p>
             {m.role === "assistant" && m.kind === "text" && !m.pending && (
-              <button className="chat-message__action" onClick={() => void handleSaveDocument(m)}>
-                Save as document
-              </button>
+              <div className="chat-message__actions">
+                <button className="chat-message__action" onClick={() => void handleSaveTextArtifact(m, "markdown")}>
+                  Save MD
+                </button>
+                <button className="chat-message__action" onClick={() => void handleSaveTextArtifact(m, "text")}>
+                  Save TXT
+                </button>
+                <button className="chat-message__action" onClick={() => void handleSaveTextArtifact(m, "json")}>
+                  Save JSON
+                </button>
+                <button className="chat-message__action" onClick={() => void handleSaveDocument(m)}>
+                  Save DOCX
+                </button>
+              </div>
             )}
             {m.role === "assistant" && m.kind === "image-gen" && m.generatedImageBase64 && (
               <button className="chat-message__action" onClick={() => void handleSaveImage(m)}>
                 Save image
               </button>
             )}
-            {m.savedTo && <p className="chat-message__saved">Saved to {m.savedTo}</p>}
+            {m.savedTo && (
+              <div className="chat-message__saved">
+                <span>{m.savedTo.startsWith("Save failed") || m.savedTo.startsWith("Open failed") ? m.savedTo : `Saved to ${m.savedTo}`}</span>
+                {m.savedArtifactPath && (
+                  <button className="chat-message__action" onClick={() => void handleOpenSavedArtifact(m)}>
+                    Open folder
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -438,10 +438,21 @@ select {
   cursor: pointer;
 }
 
+.chat-message__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .chat-message__saved {
   margin: 0.3rem 0 0;
   font-size: 0.75rem;
   color: #8fd18f;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  overflow-wrap: anywhere;
 }
 
 .chat-error {

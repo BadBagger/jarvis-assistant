@@ -28,6 +28,8 @@ export interface ChatMessage {
   pending?: boolean;
   /** Set after a "save as document"/"save image" action completes */
   savedTo?: string;
+  savedArtifactPath?: string;
+  savedArtifactFileName?: string;
 }
 
 export type TaskPlanStatus = "draft" | "ready" | "in-progress" | "blocked" | "completed";

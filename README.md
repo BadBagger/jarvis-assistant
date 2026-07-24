@@ -18,9 +18,10 @@ usage limits beyond what your hardware can do.
   endpoint (works out of the box with
   [AUTOMATIC1111's WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
   launched with `--api`).
-- **Document creation** - any assistant text reply has a "Save as document"
-  button that builds a real `.docx` (via the `docx` npm package) and writes
-  it to your configured output folder.
+- **Artifact creation** - any assistant text reply can be saved locally as
+  Markdown, plain text, JSON, or DOCX. Generated images are saved as PNGs.
+  Jarvis keeps local artifact records in app data and validates every save
+  against the configured output folder before writing.
 
 Everything talks to `localhost`/`127.0.0.1`/`[::1]` only - this app never
 binds a listening port and never calls out to the internet.
@@ -88,11 +89,14 @@ src/
                             attach, /imagine command, save-as-document and
                             save-image actions.
   settings/SettingsPage.tsx  configure Ollama/image-gen URLs, models, and
-                            the output folder.
+                            the validated output folder.
+  artifacts/                 local artifact metadata, safe file names, and
+                            save/open-in-folder flows for generated outputs.
   shared/persistence.ts     versioned settings JSON store (OS app-data dir).
 src-tauri/src/lib.rs        Rust commands: app_data_dir, read/write_text_file,
                             write_binary_file, http_get, http_post (generic
-                            local HTTP), ollama_chat (streaming chat/vision).
+                            local HTTP), artifact save/reveal commands,
+                            ollama_chat (streaming chat/vision).
 ```
 
 ## Known setup gotchas
@@ -109,6 +113,9 @@ src-tauri/src/lib.rs        Rust commands: app_data_dir, read/write_text_file,
 
 - Chat history is in-memory only (cleared on restart) - no persisted
   conversation log yet.
+- Artifact metadata is local JSON only. Current generated formats are
+  `.md`, `.txt`, `.json`, `.docx`, and `.png`; the native validation layer is
+  ready for future document/image formats such as PDF, JPG, JPEG, and WebP.
 - Image generation uses AUTOMATIC1111/A1111-API-compatible servers only;
   a ComfyUI setup needs its own API-compatibility shim or a dedicated
   ComfyUI client to work here.

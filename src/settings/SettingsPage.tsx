@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { checkBackendHealth, type HealthCheckResult } from "../shared/health";
 import { saveSettings } from "../shared/persistence";
 import type { Settings } from "../shared/types";
+import { artifactRepository } from "../artifacts/store";
 import { buildModelRegistry } from "../models/registry";
 import type { ModelCapability, ModelDescriptor } from "../models/types";
 import {
@@ -59,6 +60,7 @@ export function SettingsPage({ settings, onSaved }: Props) {
   async function handleSave() {
     setStatus(null);
     try {
+      await artifactRepository.validateOutputFolder(draft.outputDir);
       await saveSettings(draft);
       onSaved(draft);
       setStatus("Saved.");
