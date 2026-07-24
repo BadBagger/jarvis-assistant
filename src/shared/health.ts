@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { actionableError, validateBaseUrl } from "./errors";
+import {
+  DEFAULT_CHAT_MODEL,
+  DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_VISION_MODEL,
+  summarizeOllamaHealth,
+  type OllamaTagsResponse,
+} from "../ollama/reliability";
 import type { Settings } from "./types";
 
 interface HttpResult {
@@ -14,14 +21,10 @@ export interface HealthCheckResult {
   message: string;
 }
 
-interface OllamaTagsResponse {
-  models?: Array<{ name?: string }>;
-}
-
 export async function checkOllamaHealth(settings: Settings): Promise<HealthCheckResult> {
   const label = "Ollama";
   try {
-    const baseUrl = validateBaseUrl("Ollama base URL", settings.ollamaBaseUrl);
+    const baseUrl = validateBaseUrl("Ollama base URL", settings.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL);
     const result = await invoke<HttpResult>("http_get", {
       url: `${baseUrl}/api/tags`,
       timeoutMs: 5000,
@@ -37,29 +40,31 @@ export async function checkOllamaHealth(settings: Settings): Promise<HealthCheck
     }
 
     const parsed = JSON.parse(result.body) as OllamaTagsResponse;
-    const names = new Set((parsed.models ?? []).map((model) => model.name).filter(Boolean));
-    const missing = [settings.chatModel, settings.visionModel].filter((model) => !names.has(model));
-    if (missing.length > 0) {
-      return {
-        id: "ollama",
-        label,
-        ok: false,
-        message: `Connected, but missing model(s): ${missing.join(", ")}. Run ollama pull ${missing[0]}.`,
-      };
-    }
-
+    const health = summarizeOllamaHealth(
+      {
+        baseUrl,
+        chatModel: settings.chatModel || DEFAULT_CHAT_MODEL,
+        visionModel: settings.visionModel || DEFAULT_VISION_MODEL,
+      },
+      baseUrl,
+      parsed,
+    );
     return {
       id: "ollama",
       label,
-      ok: true,
-      message: `Connected at ${baseUrl}. Models available: ${settings.chatModel}, ${settings.visionModel}.`,
+      ok: health.ok,
+      message: health.message,
     };
   } catch (error) {
     return {
       id: "ollama",
       label,
       ok: false,
-      message: actionableError("Ollama health check failed", error, "Confirm Ollama is running and reachable at the configured URL."),
+      message: actionableError(
+        "Ollama health check failed",
+        error,
+        `Start Ollama and confirm it is reachable at ${DEFAULT_OLLAMA_BASE_URL}. Pull defaults with ollama pull ${DEFAULT_CHAT_MODEL} and ollama pull ${DEFAULT_VISION_MODEL}.`,
+      ),
     };
   }
 }

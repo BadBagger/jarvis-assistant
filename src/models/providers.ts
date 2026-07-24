@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { normalizeOllamaError, retryTransient, withTimeout } from "../ollama/reliability";
+import { validateBaseUrl } from "../shared/errors";
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -38,10 +40,14 @@ interface OllamaEmbedResponse {
 
 export class OllamaProvider implements ChatModelProvider, VisionModelProvider, EmbeddingProvider {
   readonly id = "ollama";
+  private readonly chatTimeoutMs = 180_000;
 
   async completeChat(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     return {
-      content: await this.streamChat(request.model.baseUrl, request.model.modelName, request.messages, request.onChunk),
+      content: await this.streamChat(request.model.baseUrl, request.model.modelName, request.messages, request.onChunk, {
+        signal: request.signal,
+        timeoutMs: request.timeoutMs,
+      }),
       model: request.model,
     };
   }
@@ -56,7 +62,10 @@ export class OllamaProvider implements ChatModelProvider, VisionModelProvider, E
     ];
 
     return {
-      content: await this.streamChat(request.model.baseUrl, request.model.modelName, messages, request.onChunk),
+      content: await this.streamChat(request.model.baseUrl, request.model.modelName, messages, request.onChunk, {
+        signal: request.signal,
+        timeoutMs: request.timeoutMs,
+      }),
       model: request.model,
     };
   }
@@ -86,13 +95,47 @@ export class OllamaProvider implements ChatModelProvider, VisionModelProvider, E
     modelName: string | undefined,
     messages: ChatProviderMessage[],
     onChunk: ((delta: string) => void) | undefined,
+    options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<string> {
+    let streamedAnyContent = false;
+    const safeModelName = requireModelName(modelName, "Ollama model");
+
+    try {
+      return await retryTransient(
+        async () => {
+          if (streamedAnyContent) {
+            throw new Error("Ollama stream stopped after partial output. Retry the message to avoid duplicated text.");
+          }
+          const content = await this.streamChatOnce(baseUrl, safeModelName, messages, (delta) => {
+            streamedAnyContent = true;
+            onChunk?.(delta);
+          }, options);
+          return content;
+        },
+        { attempts: 3, baseDelayMs: 350, signal: options.signal },
+      );
+    } catch (error) {
+      throw normalizeOllamaError(error, safeModelName);
+    }
+  }
+
+  private async streamChatOnce(
+    baseUrl: string | undefined,
+    modelName: string,
+    messages: ChatProviderMessage[],
+    onChunk: ((delta: string) => void) | undefined,
+    options: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<string> {
     const requestId = crypto.randomUUID();
     let streamError: string | null = null;
     let resolveDone!: () => void;
-    const donePromise = new Promise<void>((resolve) => {
+    let rejectDone!: (error: Error) => void;
+    const donePromise = new Promise<void>((resolve, reject) => {
       resolveDone = resolve;
+      rejectDone = reject;
     });
+    const onAbort = () => rejectDone(new Error("Ollama request was cancelled"));
+    options.signal?.addEventListener("abort", onAbort, { once: true });
 
     const unlisten = await listen<ChatChunkPayload>("jarvis:chat-chunk", (event) => {
       if (event.payload.request_id !== requestId) return;
@@ -104,14 +147,16 @@ export class OllamaProvider implements ChatModelProvider, VisionModelProvider, E
     try {
       const invokePromise = invoke<string>("ollama_chat", {
         baseUrl: requireEndpoint(baseUrl, "Ollama base URL"),
-        model: requireModelName(modelName, "Ollama model"),
+        model: modelName,
         messages,
         requestId,
+        timeoutMs: options.timeoutMs ?? this.chatTimeoutMs,
       });
-      const [fullReply] = await Promise.all([invokePromise, donePromise]);
+      const [fullReply] = await withTimeout(Promise.all([invokePromise, donePromise]), options.timeoutMs ?? this.chatTimeoutMs, options.signal);
       if (streamError) throw new Error(streamError);
       return fullReply;
     } finally {
+      options.signal?.removeEventListener("abort", onAbort);
       unlisten();
     }
   }
@@ -153,8 +198,7 @@ export class Automatic1111Provider implements ImageGenerationProvider {
 }
 
 function requireEndpoint(value: string | undefined, label: string): string {
-  if (!value?.trim()) throw new Error(`${label} is not configured`);
-  return value;
+  return validateBaseUrl(label, value ?? "");
 }
 
 function requireModelName(value: string | undefined, label: string): string {

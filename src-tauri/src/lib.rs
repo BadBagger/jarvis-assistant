@@ -246,6 +246,7 @@ async fn ollama_chat(
     model: String,
     messages: Vec<OllamaMessage>,
     request_id: String,
+    timeout_ms: Option<u64>,
 ) -> Result<String, String> {
     use futures_util::StreamExt;
 
@@ -255,14 +256,14 @@ async fn ollama_chat(
     url.set_fragment(None);
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(180_000)))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
     let response = client
         .post(url.clone())
         .json(&OllamaChatRequest {
-            model,
+            model: model.clone(),
             messages,
             stream: true,
         })
@@ -273,6 +274,14 @@ async fn ollama_chat(
     if !response.status().is_success() {
         let status = response.status();
         let text = response.text().await.unwrap_or_default();
+        if status.as_u16() == 404 && text.to_ascii_lowercase().contains("model") {
+            return Err(format!(
+                "Ollama model '{model}' is not available. Run ollama pull {model}, then retry. Details: {text}"
+            ));
+        }
+        if status.is_server_error() {
+            return Err(format!("Ollama returned a temporary HTTP {status} error: {text}"));
+        }
         return Err(format!("Ollama responded with HTTP {status}: {text}"));
     }
 

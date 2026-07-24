@@ -29,6 +29,8 @@ export interface ChatCompletionRequest {
   model: ModelDescriptor;
   messages: ChatProviderMessage[];
   onChunk?: (delta: string) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 export interface ChatCompletionResult {
@@ -41,6 +43,8 @@ export interface VisionAnalysisRequest {
   prompt: string;
   imageBase64: string;
   onChunk?: (delta: string) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 export interface ImageGenerationOptions {
