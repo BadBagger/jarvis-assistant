@@ -262,7 +262,7 @@ export function ChatPage({ settings }: Props) {
       <div className="chat-messages">
         {messages.length === 0 && (
           <p className="chat-empty-state">
-            Say something, attach an image (📎) to have it scanned/described, or type{" "}
+            Say something, attach an image to have it scanned/described, or type{" "}
             <code>/imagine a description</code> to generate one.
           </p>
         )}
@@ -274,7 +274,7 @@ export function ChatPage({ settings }: Props) {
             )}
             <p className="chat-message__content">
               {m.content}
-              {m.pending && <span className="chat-message__cursor">▍</span>}
+              {m.pending && <span className="chat-message__cursor">|</span>}
             </p>
             {m.role === "assistant" && m.kind === "text" && !m.pending && (
               <button className="chat-message__action" onClick={() => void handleSaveDocument(m)}>
@@ -326,7 +326,7 @@ export function ChatPage({ settings }: Props) {
       <div className="chat-input-row">
         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void handleAttachImage(e)} />
         <button onClick={() => fileInputRef.current?.click()} disabled={busy} title="Attach an image to scan">
-          📎
+          Attach
         </button>
         <input
           className="chat-input"

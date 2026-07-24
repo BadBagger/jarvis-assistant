@@ -15,7 +15,12 @@ async function settingsPath(): Promise<string> {
 }
 
 export async function loadSettings(): Promise<Settings> {
-  const appDir = await invoke<string>("app_data_dir");
+  let appDir: string;
+  try {
+    appDir = await invoke<string>("app_data_dir");
+  } catch {
+    return { ...DEFAULT_SETTINGS, outputDir: "Jarvis/outputs" };
+  }
   const defaults: Settings = { ...DEFAULT_SETTINGS, outputDir: `${appDir}/outputs` };
 
   const path = await settingsPath();
