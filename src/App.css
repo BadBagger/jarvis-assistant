@@ -989,6 +989,7 @@ select {
 }
 
 .memory-editor__actions,
+.memory-import-export,
 .memory-search,
 .memory-record__actions {
   display: flex;
@@ -996,6 +997,7 @@ select {
 }
 
 .memory-editor button,
+.memory-import-export button,
 .memory-search button,
 .memory-record__actions button {
   background: #2c5f9e;
@@ -1004,6 +1006,15 @@ select {
   border-radius: 8px;
   padding: 0.45rem 0.75rem;
   cursor: pointer;
+}
+
+.memory-import-export {
+  flex-direction: column;
+  margin-top: 0.8rem;
+}
+
+.memory-import-export textarea {
+  min-height: 90px;
 }
 
 .memory-search {
@@ -1064,6 +1075,7 @@ select {
 
 .memory-record footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.75rem;
   margin-top: 0.7rem;

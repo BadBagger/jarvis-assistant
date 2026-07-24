@@ -2,10 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { defaultMemoryEmbeddingProvider, type MemoryEmbeddingProvider } from "./embeddingProvider";
 import type {
   CreateMemoryRecordInput,
+  MemoryProjectLink,
   MemoryRecord,
+  MemoryRecordType,
   MemoryRepository,
   MemoryRetrievalQuery,
   MemoryRetrievalResult,
+  MemorySource,
   MemoryStoreFile,
   UpdateMemoryRecordInput,
 } from "./types";
@@ -13,10 +16,28 @@ import type {
 const STORE_VERSION = 1;
 const DEFAULT_LIMIT = 6;
 const TOKEN_MIN_LENGTH = 2;
+const MEMORY_TYPES = new Set<MemoryRecordType>(["user-preference", "project-summary", "conversation-summary", "saved-fact"]);
+
+export interface MemoryStorage {
+  read(): Promise<string | null>;
+  write(contents: string): Promise<void>;
+}
 
 async function memoryPath(): Promise<string> {
   const dir = await invoke<string>("app_data_dir");
   return `${dir}/memory.json`;
+}
+
+class TauriMemoryStorage implements MemoryStorage {
+  async read(): Promise<string | null> {
+    const path = await memoryPath();
+    return invoke<string | null>("read_text_file", { path });
+  }
+
+  async write(contents: string): Promise<void> {
+    const path = await memoryPath();
+    await invoke("write_text_file", { path, contents });
+  }
 }
 
 function nowIso(): string {
@@ -36,6 +57,44 @@ function normalizeTags(tags: string[] | undefined): string[] {
     });
 }
 
+function normalizeConfidence(confidence: number | undefined): number {
+  if (typeof confidence !== "number" || Number.isNaN(confidence)) return 0.75;
+  return Math.min(1, Math.max(0, confidence));
+}
+
+function normalizeType(type: unknown): MemoryRecordType {
+  if (typeof type === "string" && MEMORY_TYPES.has(type as MemoryRecordType)) return type as MemoryRecordType;
+  if (type === "preference") return "user-preference";
+  if (type === "constraint" || type === "note" || type === "fact") return "saved-fact";
+  if (type === "project") return "project-summary";
+  if (type === "conversation") return "conversation-summary";
+  return "saved-fact";
+}
+
+function normalizeSource(source: unknown): MemorySource {
+  if (!source || typeof source !== "object") return { kind: "import", label: "Imported memory" };
+  const candidate = source as Partial<MemorySource>;
+  const sourceKinds = new Set<MemorySource["kind"]>(["manual", "chat", "project", "import", "system"]);
+  return {
+    kind: sourceKinds.has(candidate.kind as MemorySource["kind"]) ? (candidate.kind as MemorySource["kind"]) : "import",
+    label: typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : "Imported memory",
+    conversationId: typeof candidate.conversationId === "string" ? candidate.conversationId : undefined,
+    messageId: typeof candidate.messageId === "string" ? candidate.messageId : undefined,
+  };
+}
+
+function normalizeProject(project: unknown): MemoryProjectLink | undefined {
+  if (!project || typeof project !== "object") return undefined;
+  const candidate = project as Partial<MemoryProjectLink>;
+  if (typeof candidate.id !== "string" || !candidate.id.trim()) return undefined;
+  if (typeof candidate.name !== "string" || !candidate.name.trim()) return undefined;
+  return {
+    id: candidate.id.trim(),
+    name: candidate.name.trim(),
+    path: typeof candidate.path === "string" && candidate.path.trim() ? candidate.path.trim() : undefined,
+  };
+}
+
 function tokenize(value: string): string[] {
   return value
     .toLowerCase()
@@ -45,7 +104,17 @@ function tokenize(value: string): string[] {
 }
 
 function recordSearchText(record: MemoryRecord): string {
-  return [record.type, record.title, record.content, record.tags.join(" "), record.source.label, record.source.kind].join(" ");
+  return [
+    record.type,
+    record.title,
+    record.content,
+    record.tags.join(" "),
+    record.source.label,
+    record.source.kind,
+    record.project?.id ?? "",
+    record.project?.name ?? "",
+    record.project?.path ?? "",
+  ].join(" ");
 }
 
 function scoreRecord(record: MemoryRecord, queryTokens: string[], nowMs: number): MemoryRetrievalResult | null {
@@ -69,6 +138,8 @@ function scoreRecord(record: MemoryRecord, queryTokens: string[], nowMs: number)
   if (recencyScore > 0.75) reasons.add("recent");
 
   if (score <= 0) return null;
+  score += record.confidence;
+  if (record.confidence >= 0.85) reasons.add("high confidence");
   return { record, score, reasons: Array.from(reasons) };
 }
 
@@ -80,23 +151,43 @@ function validateStore(raw: unknown): MemoryStoreFile {
   }
   return {
     version: STORE_VERSION,
-    records: parsed.records.filter((record): record is MemoryRecord => {
-      return (
-        !!record &&
-        typeof record.id === "string" &&
-        typeof record.title === "string" &&
-        typeof record.content === "string" &&
-        Array.isArray(record.tags) &&
-        !!record.source &&
-        typeof record.createdAt === "string" &&
-        typeof record.updatedAt === "string"
-      );
-    }),
+    records: parsed.records.map(normalizeImportedRecord).filter((record): record is MemoryRecord => record !== null),
   };
 }
 
+function normalizeImportedRecord(raw: unknown): MemoryRecord | null {
+  if (!raw || typeof raw !== "object") return null;
+  const record = raw as Partial<MemoryRecord>;
+  if (typeof record.title !== "string" || typeof record.content !== "string") return null;
+  const timestamp = nowIso();
+  const createdAt = typeof record.createdAt === "string" ? record.createdAt : timestamp;
+  const updatedAt = typeof record.updatedAt === "string" ? record.updatedAt : createdAt;
+  return {
+    id: typeof record.id === "string" && record.id.trim() ? record.id : crypto.randomUUID(),
+    type: normalizeType(record.type),
+    title: record.title.trim(),
+    content: record.content.trim(),
+    tags: normalizeTags(record.tags),
+    source: normalizeSource(record.source),
+    confidence: normalizeConfidence(record.confidence),
+    project: normalizeProject(record.project),
+    createdAt,
+    updatedAt,
+    lastAccessedAt: typeof record.lastAccessedAt === "string" ? record.lastAccessedAt : undefined,
+    embedding: Array.isArray(record.embedding) && record.embedding.every((value) => typeof value === "number") ? record.embedding : undefined,
+  };
+}
+
+function canRetrieveRecord(record: MemoryRecord, query: MemoryRetrievalQuery): boolean {
+  if (!record.project) return true;
+  return !!query.projectId && record.project.id === query.projectId;
+}
+
 export class JsonMemoryRepository implements MemoryRepository {
-  constructor(private readonly embeddingProvider: MemoryEmbeddingProvider = defaultMemoryEmbeddingProvider) {}
+  constructor(
+    private readonly embeddingProvider: MemoryEmbeddingProvider = defaultMemoryEmbeddingProvider,
+    private readonly storage: MemoryStorage = new TauriMemoryStorage(),
+  ) {}
 
   async list(): Promise<MemoryRecord[]> {
     const store = await this.loadStore();
@@ -113,6 +204,8 @@ export class JsonMemoryRepository implements MemoryRepository {
       content: input.content.trim(),
       tags: normalizeTags(input.tags),
       source: input.source,
+      confidence: normalizeConfidence(input.confidence),
+      project: normalizeProject(input.project),
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -140,6 +233,8 @@ export class JsonMemoryRepository implements MemoryRepository {
       content: input.content === undefined ? current.content : input.content.trim(),
       tags: input.tags === undefined ? current.tags : normalizeTags(input.tags),
       source: input.source === undefined ? current.source : input.source,
+      confidence: input.confidence === undefined ? current.confidence : normalizeConfidence(input.confidence),
+      project: input.project === undefined ? current.project : normalizeProject(input.project),
       updatedAt: nowIso(),
       embedding: undefined,
     };
@@ -171,6 +266,7 @@ export class JsonMemoryRepository implements MemoryRepository {
     const records = await this.list();
     const matches = records
       .filter((record) => !typeSet || typeSet.has(record.type))
+      .filter((record) => canRetrieveRecord(record, query))
       .map((record) => scoreRecord(record, queryTokens, nowMs))
       .filter((result): result is MemoryRetrievalResult => result !== null)
       .sort((a, b) => b.score - a.score)
@@ -189,9 +285,35 @@ export class JsonMemoryRepository implements MemoryRepository {
     return matches;
   }
 
+  async exportJson(options: { includeEmbeddings?: boolean } = {}): Promise<string> {
+    const store = await this.loadStore();
+    const records = options.includeEmbeddings
+      ? store.records
+      : store.records.map(({ embedding, ...record }) => {
+          void embedding;
+          return record;
+        });
+    return JSON.stringify({ version: STORE_VERSION, records }, null, 2);
+  }
+
+  async importJson(json: string, options: { replace?: boolean } = {}): Promise<MemoryRecord[]> {
+    const parsed = validateStore(JSON.parse(json));
+    const incoming = parsed.records.map((record) => ({
+      ...record,
+      source: record.source.kind === "import" ? record.source : { ...record.source, kind: "import" as const },
+    }));
+    const current = options.replace ? { version: STORE_VERSION, records: [] } : await this.loadStore();
+    const byId = new Map(current.records.map((record) => [record.id, record]));
+    for (const record of incoming) {
+      byId.set(record.id, record);
+    }
+    const nextRecords = Array.from(byId.values());
+    await this.saveStore({ version: STORE_VERSION, records: nextRecords });
+    return incoming;
+  }
+
   private async loadStore(): Promise<MemoryStoreFile> {
-    const path = await memoryPath();
-    const raw = await invoke<string | null>("read_text_file", { path });
+    const raw = await this.storage.read();
     if (!raw) return { version: STORE_VERSION, records: [] };
     try {
       return validateStore(JSON.parse(raw));
@@ -201,8 +323,7 @@ export class JsonMemoryRepository implements MemoryRepository {
   }
 
   private async saveStore(store: MemoryStoreFile): Promise<void> {
-    const path = await memoryPath();
-    await invoke("write_text_file", { path, contents: JSON.stringify(store, null, 2) });
+    await this.storage.write(JSON.stringify(store, null, 2));
   }
 }
 

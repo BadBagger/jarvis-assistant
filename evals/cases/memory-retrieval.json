@@ -11,20 +11,22 @@
       "records": [
         {
           "id": "memory-output-folder",
-          "type": "preference",
+          "type": "user-preference",
           "title": "Jarvis output folder",
           "content": "Generated documents and images should be saved to the configured local output folder.",
           "tags": ["jarvis", "output"],
+          "confidence": 0.95,
           "source": {"kind": "manual", "label": "settings"},
           "createdAt": "2026-07-22T12:00:00.000Z",
           "updatedAt": "2026-07-22T12:00:00.000Z"
         },
         {
           "id": "memory-chat-style",
-          "type": "preference",
+          "type": "user-preference",
           "title": "Chat style",
           "content": "Jarvis should answer concisely and avoid unsupported claims.",
           "tags": ["chat"],
+          "confidence": 0.75,
           "source": {"kind": "manual", "label": "settings"},
           "createdAt": "2026-07-20T12:00:00.000Z",
           "updatedAt": "2026-07-20T12:00:00.000Z"
@@ -44,26 +46,28 @@
     "task": "Respect memory type filters during retrieval.",
     "input": {
       "query": "approval before file changes",
-      "types": ["constraint"],
+      "types": ["saved-fact"],
       "limit": 3,
       "now": "2026-07-23T12:00:00.000Z",
       "records": [
         {
           "id": "memory-approval-constraint",
-          "type": "constraint",
+          "type": "saved-fact",
           "title": "Approval before file changes",
           "content": "Ask for approval before dangerous or external tool execution.",
           "tags": ["approval", "tools"],
+          "confidence": 0.9,
           "source": {"kind": "manual", "label": "policy"},
           "createdAt": "2026-07-22T12:00:00.000Z",
           "updatedAt": "2026-07-22T12:00:00.000Z"
         },
         {
           "id": "memory-approval-note",
-          "type": "note",
+          "type": "saved-fact",
           "title": "Approval copy",
           "content": "Button labels should be clear.",
           "tags": ["approval"],
+          "confidence": 0.75,
           "source": {"kind": "manual", "label": "ux"},
           "createdAt": "2026-07-23T10:00:00.000Z",
           "updatedAt": "2026-07-23T10:00:00.000Z"
@@ -73,6 +77,48 @@
     "deterministic_expectations": {
       "expected_top_id": "memory-approval-constraint",
       "expected_ids": ["memory-approval-constraint"]
+    }
+  },
+  {
+    "id": "memory-retrieval-project-privacy-boundary",
+    "suite": "memory_retrieval",
+    "mode": "deterministic",
+    "task": "Do not retrieve another project's linked memory unless the query is scoped to that project.",
+    "input": {
+      "query": "release private notes",
+      "projectId": "jarvis",
+      "limit": 5,
+      "now": "2026-07-23T12:00:00.000Z",
+      "records": [
+        {
+          "id": "memory-jarvis-release",
+          "type": "project-summary",
+          "title": "Jarvis release notes",
+          "content": "Jarvis release verification includes evals and cargo test.",
+          "tags": ["release"],
+          "confidence": 0.9,
+          "project": {"id": "jarvis", "name": "Jarvis Assistant"},
+          "source": {"kind": "project", "label": "handoff"},
+          "createdAt": "2026-07-22T12:00:00.000Z",
+          "updatedAt": "2026-07-22T12:00:00.000Z"
+        },
+        {
+          "id": "memory-other-private",
+          "type": "project-summary",
+          "title": "Private release notes",
+          "content": "Other workspace launch details must stay out of Jarvis context.",
+          "tags": ["release", "private"],
+          "confidence": 0.95,
+          "project": {"id": "other", "name": "Other Project"},
+          "source": {"kind": "project", "label": "handoff"},
+          "createdAt": "2026-07-23T10:00:00.000Z",
+          "updatedAt": "2026-07-23T10:00:00.000Z"
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_top_id": "memory-jarvis-release",
+      "expected_ids": ["memory-jarvis-release"]
     }
   }
 ]

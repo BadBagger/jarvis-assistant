@@ -25,7 +25,17 @@ function tokenize(value) {
 }
 
 function recordSearchText(record) {
-  return [record.type, record.title, record.content, record.tags.join(" "), record.source.label, record.source.kind].join(" ");
+  return [
+    record.type,
+    record.title,
+    record.content,
+    record.tags.join(" "),
+    record.source.label,
+    record.source.kind,
+    record.project?.id ?? "",
+    record.project?.name ?? "",
+    record.project?.path ?? "",
+  ].join(" ");
 }
 
 function scoreMemoryRecord(record, queryTokens, nowMs) {
@@ -48,6 +58,7 @@ function scoreMemoryRecord(record, queryTokens, nowMs) {
   score += recencyScore;
   if (recencyScore > 0.75) reasons.add("recent");
 
+  score += typeof record.confidence === "number" ? Math.min(1, Math.max(0, record.confidence)) : 0.75;
   return score <= 0 ? null : { record, score, reasons: Array.from(reasons) };
 }
 
@@ -57,6 +68,7 @@ function retrieveMemory(input) {
   const nowMs = Date.parse(input.now);
   return input.records
     .filter((record) => !typeSet || typeSet.has(record.type))
+    .filter((record) => !record.project || (input.projectId && record.project.id === input.projectId))
     .map((record) => scoreMemoryRecord(record, queryTokens, nowMs))
     .filter(Boolean)
     .sort((a, b) => b.score - a.score)

@@ -7,6 +7,12 @@ export interface MemorySource {
   messageId?: string;
 }
 
+export interface MemoryProjectLink {
+  id: string;
+  name: string;
+  path?: string;
+}
+
 export interface MemoryRecord {
   id: string;
   type: MemoryRecordType;
@@ -14,6 +20,8 @@ export interface MemoryRecord {
   content: string;
   tags: string[];
   source: MemorySource;
+  confidence: number;
+  project?: MemoryProjectLink;
   createdAt: string;
   updatedAt: string;
   lastAccessedAt?: string;
@@ -31,6 +39,8 @@ export interface CreateMemoryRecordInput {
   content: string;
   tags?: string[];
   source: MemorySource;
+  confidence?: number;
+  project?: MemoryProjectLink;
 }
 
 export interface UpdateMemoryRecordInput {
@@ -39,11 +49,14 @@ export interface UpdateMemoryRecordInput {
   content?: string;
   tags?: string[];
   source?: MemorySource;
+  confidence?: number;
+  project?: MemoryProjectLink | null;
 }
 
 export interface MemoryRetrievalQuery {
   query: string;
   types?: MemoryRecordType[];
+  projectId?: string;
   limit?: number;
   includeEmbeddings?: boolean;
 }
@@ -60,4 +73,6 @@ export interface MemoryRepository {
   update(id: string, input: UpdateMemoryRecordInput): Promise<MemoryRecord>;
   delete(id: string): Promise<void>;
   retrieve(query: MemoryRetrievalQuery): Promise<MemoryRetrievalResult[]>;
+  exportJson(options?: { includeEmbeddings?: boolean }): Promise<string>;
+  importJson(json: string, options?: { replace?: boolean }): Promise<MemoryRecord[]>;
 }

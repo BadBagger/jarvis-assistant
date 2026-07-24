@@ -17,6 +17,9 @@ Each memory record has:
 - `tags`: normalized lowercase tags.
 - `source`: structured source metadata with `kind`, `label`, and optional
   `conversationId`/`messageId`.
+- `confidence`: numeric trust signal from 0 to 1.
+- `project`: optional linkage with project `id`, display `name`, and optional
+  local `path`.
 - `createdAt`: ISO timestamp.
 - `updatedAt`: ISO timestamp.
 - `lastAccessedAt`: ISO timestamp set after retrieval matches.
@@ -40,6 +43,8 @@ The typed boundary lives in `src/memory`:
 - `store.ts` implements `JsonMemoryRepository`, backed by local app-data JSON.
 - `embeddingProvider.ts` defines the embedding provider contract and a clean stub.
 - `MemoryPage.tsx` provides editable/deletable records in the app UI.
+- `exportJson()` and `importJson()` move versioned memory JSON in and out of the
+  local store. Exports omit embeddings unless explicitly requested.
 
 Use `memoryRepository` for the current app default:
 
@@ -50,10 +55,13 @@ const record = await memoryRepository.create({
   content: "Prefer concise implementation notes after builds.",
   tags: ["style"],
   source: { kind: "manual", label: "Memory page" },
+  confidence: 0.9,
+  project: { id: "jarvis", name: "Jarvis Assistant" },
 });
 
 const matches = await memoryRepository.retrieve({
   query: "how should you summarize builds",
+  projectId: "jarvis",
   limit: 5,
 });
 ```
@@ -65,9 +73,15 @@ keyword/recency based:
 
 - Query text is tokenized into lowercase terms.
 - Records are searched across type, title, content, tags, and source label.
+- Project id/name/path are searchable only after the project boundary allows the
+  record into the candidate set.
 - Title and tag matches receive extra weight.
 - Recently updated records receive a small recency boost.
+- Confidence adds a small trust boost after keyword matching.
 - Matching records are sorted by score and capped by `limit`.
+- Unscoped retrieval returns global memories only. Scoped retrieval returns
+  global memories plus memories linked to the requested project id. Linked
+  memories from other projects are excluded.
 
 Chat uses this boundary before normal text completion. Matching records are added
 as a system context message so local memory can help the model answer without
@@ -80,8 +94,10 @@ The Memory tab supports:
 - Creating records manually.
 - Editing type, title, content, tags, and source label.
 - Editing source kind and source label.
+- Editing confidence and optional project linkage.
 - Deleting records from `memory.json`.
 - Searching through the same retrieval API used by chat.
+- Importing/exporting versioned memory JSON.
 - Inspecting created and updated timestamps for each record.
 
 Deletion is a hard local delete in v1. If audit history becomes important later,

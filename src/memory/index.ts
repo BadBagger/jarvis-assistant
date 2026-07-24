@@ -1,7 +1,8 @@
 export { defaultMemoryEmbeddingProvider } from "./embeddingProvider";
-export { JsonMemoryRepository, memoryRepository } from "./store";
+export { JsonMemoryRepository, memoryRepository, type MemoryStorage } from "./store";
 export type {
   CreateMemoryRecordInput,
+  MemoryProjectLink,
   MemoryRecord,
   MemoryRecordType,
   MemoryRepository,
