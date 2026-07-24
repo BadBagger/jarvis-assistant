@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import { ChatPage } from "./chat/ChatPage";
+import { MemoryPage } from "./memory/MemoryPage";
+import { PlanningPage } from "./planning/PlanningPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { loadSettings } from "./shared/persistence";
 import type { Settings } from "./shared/types";
 
-type View = "chat" | "settings";
+type View = "chat" | "plans" | "memory" | "settings";
 
 function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -27,13 +29,22 @@ function App() {
           <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
             Chat
           </button>
+          <button className={view === "plans" ? "active" : ""} onClick={() => setView("plans")}>
+            Plans
+          </button>
+          <button className={view === "memory" ? "active" : ""} onClick={() => setView("memory")}>
+            Memory
+          </button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}>
             Settings
           </button>
         </nav>
       </header>
       <main className="app-main">
-        {view === "chat" ? <ChatPage settings={settings} /> : <SettingsPage settings={settings} onSaved={setSettings} />}
+        {view === "chat" && <ChatPage settings={settings} />}
+        {view === "plans" && <PlanningPage />}
+        {view === "memory" && <MemoryPage />}
+        {view === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
       </main>
     </div>
   );

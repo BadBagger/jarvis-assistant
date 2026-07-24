@@ -1,19 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { OllamaProvider } from "../models/providers";
+import type { ChatProviderMessage } from "../models/types";
 
-export interface OllamaChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
-  /** Base64 image bytes, no "data:image/...;base64," prefix -- required for vision models like llava */
-  images?: string[];
-}
-
-interface ChatChunkPayload {
-  request_id: string;
-  content: string;
-  done: boolean;
-  error: string | null;
-}
+export type OllamaChatMessage = ChatProviderMessage;
 
 /**
  * Sends a chat/vision request to a local Ollama server and streams the
@@ -29,35 +17,22 @@ export async function streamOllamaChat(
   messages: OllamaChatMessage[],
   onChunk: (delta: string) => void,
 ): Promise<string> {
-  const requestId = crypto.randomUUID();
-  let streamError: string | null = null;
-  let resolveDone!: () => void;
-  const donePromise = new Promise<void>((resolve) => {
-    resolveDone = resolve;
-  });
-
-  // Attach the listener *before* invoking the command so no early chunk can
-  // arrive and be missed while the listener is still being set up.
-  const unlisten = await listen<ChatChunkPayload>("jarvis:chat-chunk", (event) => {
-    if (event.payload.request_id !== requestId) return;
-    if (event.payload.error) streamError = event.payload.error;
-    if (event.payload.content) onChunk(event.payload.content);
-    if (event.payload.done) resolveDone();
-  });
-
-  try {
-    const invokePromise = invoke<string>("ollama_chat", {
+  const provider = new OllamaProvider();
+  const result = await provider.completeChat({
+    model: {
+      id: "ollama:compat",
+      provider: "ollama",
+      label: `Ollama (${model})`,
+      modelName: model,
       baseUrl,
-      model,
-      messages,
-      requestId,
-    });
-    const [fullReply] = await Promise.all([invokePromise, donePromise]);
-    if (streamError) throw new Error(streamError);
-    return fullReply;
-  } finally {
-    unlisten();
-  }
+      capabilities: ["chat"],
+      local: true,
+      enabled: true,
+    },
+    messages,
+    onChunk,
+  });
+  return result.content;
 }
 
 /** Strips a `data:image/png;base64,...` prefix down to the raw base64 payload Ollama expects. */

@@ -1,8 +1,18 @@
 import { useRef, useState, type ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { buildDocxBase64 } from "../documents/generateDocx";
-import { generateImage } from "../imagegen/client";
-import { dataUrlToBase64, streamOllamaChat, type OllamaChatMessage } from "../ollama/client";
+import { memoryRepository } from "../memory/store";
+import { createModelRouter } from "../models/router";
+import { dataUrlToBase64 } from "../ollama/client";
+import {
+  createRetryQueueItem,
+  markRetryFailed,
+  markRetrying,
+  removeRetryItem,
+  type RetryQueueItem,
+  type RetryRequest,
+} from "./retryQueue";
+import type { ChatProviderMessage } from "../models/types";
 import type { ChatMessage, Settings } from "../shared/types";
 
 interface Props {
@@ -15,6 +25,7 @@ export function ChatPage({ settings }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [attachedImage, setAttachedImage] = useState<{ dataUrl: string } | null>(null);
+  const [retryQueue, setRetryQueue] = useState<RetryQueueItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -23,10 +34,96 @@ export function ChatPage({ settings }: Props) {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   }
 
-  function historyForOllama(): OllamaChatMessage[] {
+  function historyForChat(): ChatProviderMessage[] {
     return messages
       .filter((m) => m.kind === "text" || m.kind === "image-scan")
       .map((m) => ({ role: m.role, content: m.content }));
+  }
+
+  function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
+  }
+
+  function assistantKindForRequest(request: RetryRequest): ChatMessage["kind"] {
+    return request.kind === "image-gen" ? "image-gen" : "text";
+  }
+
+  function queueFailedRequest(request: RetryRequest, assistantMessageId: string, err: unknown) {
+    const message = errorMessage(err);
+    updateMessage(assistantMessageId, {
+      pending: false,
+      kind: "error",
+      content: `Queued for retry: ${message}`,
+    });
+    setRetryQueue((prev) => [
+      ...prev,
+      createRetryQueueItem({
+        id: crypto.randomUUID(),
+        request,
+        assistantMessageId,
+        error: message,
+        now: Date.now(),
+      }),
+    ]);
+  }
+
+  async function runRequest(request: RetryRequest, assistantId: string) {
+    const router = createModelRouter(settings);
+    updateMessage(assistantId, {
+      pending: true,
+      kind: assistantKindForRequest(request),
+      content: request.kind === "image-gen" ? request.prompt : "",
+      generatedImageBase64: undefined,
+      savedTo: undefined,
+    });
+
+    if (request.kind === "text") {
+      await router.completeChat(request.messages ?? [{ role: "user", content: request.prompt }], (delta) => {
+        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
+      });
+      updateMessage(assistantId, { pending: false });
+      return;
+    }
+
+    if (request.kind === "image-scan") {
+      if (!request.imageDataUrl) throw new Error("Retry is missing the attached image");
+      await router.analyzeImage(request.prompt, dataUrlToBase64(request.imageDataUrl), (delta) => {
+        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
+      });
+      updateMessage(assistantId, { pending: false });
+      return;
+    }
+
+    const result = await router.generateImage(request.prompt);
+    updateMessage(assistantId, { pending: false, generatedImageBase64: result.imageBase64 });
+  }
+
+  async function handleRetry(item: RetryQueueItem) {
+    if (busy) return;
+    setError(null);
+    setBusy(true);
+    setRetryQueue((prev) => markRetrying(prev, item.id, Date.now()));
+    try {
+      await runRequest(item.request, item.assistantMessageId);
+      setRetryQueue((prev) => removeRetryItem(prev, item.id));
+    } catch (err) {
+      const message = errorMessage(err);
+      updateMessage(item.assistantMessageId, {
+        pending: false,
+        kind: "error",
+        content: `Queued for retry: ${message}`,
+      });
+      setRetryQueue((prev) => markRetryFailed(prev, item.id, message, Date.now()));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRetryAll() {
+    const snapshot = retryQueue.filter((item) => item.status !== "retrying").sort((a, b) => a.createdAt - b.createdAt);
+    for (const item of snapshot) {
+      await handleRetry(item);
+    }
   }
 
   async function handleAttachImage(e: ChangeEvent<HTMLInputElement>) {
@@ -60,23 +157,30 @@ export function ChatPage({ settings }: Props) {
   }
 
   async function handleTextChat(text: string) {
-    const history = historyForOllama();
+    const history = historyForChat();
+    const memories = await memoryRepository.retrieve({ query: text, limit: 5 });
+    const memoryContext: ChatProviderMessage[] =
+      memories.length > 0
+        ? [
+            {
+              role: "system",
+              content: [
+                "Relevant local Jarvis memories follow. Use them only when they help answer the user, and do not claim they came from outside this device.",
+                ...memories.map((match) => `- ${match.record.type}: ${match.record.title}: ${match.record.content}`),
+              ].join("\n"),
+            },
+          ]
+        : [];
     const userMsg: ChatMessage = { id: crypto.randomUUID(), role: "user", kind: "text", content: text };
     const assistantId = crypto.randomUUID();
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", kind: "text", content: "", pending: true };
+    const request: RetryRequest = { kind: "text", prompt: text, messages: [...memoryContext, ...history, { role: "user", content: text }] };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setBusy(true);
     try {
-      await streamOllamaChat(settings.ollamaBaseUrl, settings.chatModel, [...history, { role: "user", content: text }], (delta) => {
-        setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
-      });
-      updateMessage(assistantId, { pending: false });
+      await runRequest(request, assistantId);
     } catch (err) {
-      updateMessage(assistantId, {
-        pending: false,
-        kind: "error",
-        content: err instanceof Error ? err.message : String(err),
-      });
+      queueFailedRequest(request, assistantId, err);
     } finally {
       setBusy(false);
     }
@@ -93,24 +197,13 @@ export function ChatPage({ settings }: Props) {
     };
     const assistantId = crypto.randomUUID();
     const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", kind: "text", content: "", pending: true };
+    const request: RetryRequest = { kind: "image-scan", prompt, imageDataUrl: dataUrl };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setBusy(true);
     try {
-      await streamOllamaChat(
-        settings.ollamaBaseUrl,
-        settings.visionModel,
-        [{ role: "user", content: prompt, images: [dataUrlToBase64(dataUrl)] }],
-        (delta) => {
-          setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)));
-        },
-      );
-      updateMessage(assistantId, { pending: false });
+      await runRequest(request, assistantId);
     } catch (err) {
-      updateMessage(assistantId, {
-        pending: false,
-        kind: "error",
-        content: err instanceof Error ? err.message : String(err),
-      });
+      queueFailedRequest(request, assistantId, err);
     } finally {
       setBusy(false);
     }
@@ -130,17 +223,13 @@ export function ChatPage({ settings }: Props) {
       content: prompt,
       pending: true,
     };
+    const request: RetryRequest = { kind: "image-gen", prompt };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setBusy(true);
     try {
-      const base64 = await generateImage(settings.imageGenBaseUrl, prompt);
-      updateMessage(assistantId, { pending: false, generatedImageBase64: base64 });
+      await runRequest(request, assistantId);
     } catch (err) {
-      updateMessage(assistantId, {
-        pending: false,
-        kind: "error",
-        content: err instanceof Error ? err.message : String(err),
-      });
+      queueFailedRequest(request, assistantId, err);
     } finally {
       setBusy(false);
     }
@@ -203,6 +292,30 @@ export function ChatPage({ settings }: Props) {
       </div>
 
       {error && <p className="chat-error">{error}</p>}
+      {retryQueue.length > 0 && (
+        <section className="chat-retry-queue" aria-label="Retry queue">
+          <div className="chat-retry-queue__header">
+            <strong>Retry queue</strong>
+            <button onClick={() => void handleRetryAll()} disabled={busy}>
+              Retry all
+            </button>
+          </div>
+          {retryQueue.map((item) => (
+            <article key={item.id} className={`chat-retry-item chat-retry-item--${item.status}`}>
+              <div>
+                <strong>{item.request.kind}</strong>
+                <span>{item.request.prompt}</span>
+                <small>
+                  {item.status} | {item.attempts} {item.attempts === 1 ? "attempt" : "attempts"} | {item.error}
+                </small>
+              </div>
+              <button onClick={() => void handleRetry(item)} disabled={busy || item.status === "retrying"}>
+                Retry
+              </button>
+            </article>
+          ))}
+        </section>
+      )}
       {attachedImage && (
         <div className="chat-attachment-preview">
           <img src={attachedImage.dataUrl} alt="attachment preview" />

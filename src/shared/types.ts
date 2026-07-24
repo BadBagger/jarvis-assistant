@@ -29,3 +29,51 @@ export interface ChatMessage {
   /** Set after a "save as document"/"save image" action completes */
   savedTo?: string;
 }
+
+export type TaskPlanStatus = "draft" | "ready" | "in-progress" | "blocked" | "completed";
+export type TaskStepStatus = "todo" | "doing" | "blocked" | "done";
+export type TaskArtifactKind = "note" | "markdown" | "document" | "image" | "code" | "other";
+
+export interface TaskPlanNote {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface TaskPlanStep {
+  id: string;
+  title: string;
+  details: string;
+  status: TaskStepStatus;
+  notes: TaskPlanNote[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskPlanArtifact {
+  id: string;
+  title: string;
+  kind: TaskArtifactKind;
+  path: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface TaskPlan {
+  id: string;
+  title: string;
+  goal: string;
+  status: TaskPlanStatus;
+  permissionBoundary: string;
+  steps: TaskPlanStep[];
+  notes: TaskPlanNote[];
+  artifacts: TaskPlanArtifact[];
+  resultSummary: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskPlanStoreFile {
+  version: 1;
+  plans: TaskPlan[];
+}

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "image-shaping-512-default",
+    "suite": "image_generation_request_shaping",
+    "mode": "deterministic",
+    "task": "Shape a simple /imagine request into a bounded local image generation payload.",
+    "input": {
+      "user_request": "/imagine a clean desktop assistant icon, glass panel, blue accent"
+    },
+    "deterministic_expectations": {
+      "shaped_request": {
+        "prompt": "clean desktop assistant icon, glass panel, blue accent",
+        "options": {
+          "width": 512,
+          "height": 512,
+          "steps": 20,
+          "negativePrompt": "blurry, low quality, text artifacts"
+        }
+      },
+      "prompt_must_include": ["desktop assistant icon", "blue accent"],
+      "prompt_must_not_include": ["/imagine"],
+      "allowed_dimensions": [512, 768, 1024],
+      "max_steps": 30
+    }
+  },
+  {
+    "id": "image-shaping-no-real-person-claim",
+    "suite": "image_generation_request_shaping",
+    "mode": "deterministic",
+    "task": "Keep generated image prompts from claiming an exact real-person depiction when no reference is supplied.",
+    "input": {
+      "user_request": "/imagine make an exact photo of Tony Stark as my assistant"
+    },
+    "deterministic_expectations": {
+      "shaped_request": {
+        "prompt": "cinematic fictional armored-tech desktop assistant portrait, confident expression, workshop lighting",
+        "options": {
+          "width": 512,
+          "height": 512,
+          "steps": 20,
+          "negativePrompt": "celebrity likeness, exact real person, blurry, low quality"
+        }
+      },
+      "prompt_must_include": ["fictional", "desktop assistant"],
+      "prompt_must_not_include": ["exact photo", "Tony Stark"],
+      "allowed_dimensions": [512, 768, 1024],
+      "max_steps": 30
+    }
+  }
+]

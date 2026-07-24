@@ -9,10 +9,33 @@
 // Rust's HTTP client isn't subject to that browser restriction anyway.
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::UNIX_EPOCH;
 use tauri::{Emitter, Manager};
+
+fn parse_local_http_url(label: &str, value: &str) -> Result<Url, String> {
+    let parsed = Url::parse(value.trim()).map_err(|e| format!("{label} must be a valid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err(format!("{label} must start with http:// or https://")),
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| format!("{label} must include a host"))?
+        .to_ascii_lowercase();
+    let is_localhost = host == "localhost" || host == "::1" || host == "[::1]" || host.starts_with("127.");
+    if !is_localhost {
+        return Err(format!(
+            "{label} must point to localhost, 127.0.0.1, or [::1]; got {host}"
+        ));
+    }
+
+    Ok(parsed)
+}
 
 #[tauri::command]
 fn app_data_dir(app: tauri::AppHandle) -> Result<String, String> {
@@ -61,6 +84,53 @@ fn write_binary_file(path: String, base64_data: String) -> Result<(), String> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size_bytes: Option<u64>,
+    modified_ms: Option<u128>,
+}
+
+#[tauri::command]
+fn list_directory(path: String, limit: Option<usize>) -> Result<Vec<DirectoryEntry>, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Ok(Vec::new());
+    }
+    if !p.is_dir() {
+        return Err(format!("{path} is not a directory"));
+    }
+
+    let limit = limit.unwrap_or(100).min(500);
+    let mut entries = Vec::new();
+
+    for entry in fs::read_dir(&p).map_err(|e| format!("failed to list {path}: {e}"))?.take(limit) {
+        let entry = entry.map_err(|e| format!("failed to read directory entry in {path}: {e}"))?;
+        let metadata = entry
+            .metadata()
+            .map_err(|e| format!("failed to read metadata for {:?}: {e}", entry.path()))?;
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis());
+
+        entries.push(DirectoryEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            path: entry.path().to_string_lossy().to_string(),
+            is_dir: metadata.is_dir(),
+            size_bytes: if metadata.is_file() { Some(metadata.len()) } else { None },
+            modified_ms,
+        });
+    }
+
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
+}
+
+#[derive(Serialize)]
 struct HttpResult {
     status: u16,
     body: String,
@@ -68,13 +138,14 @@ struct HttpResult {
 
 #[tauri::command]
 async fn http_get(url: String, timeout_ms: Option<u64>) -> Result<HttpResult, String> {
+    let url = parse_local_http_url("URL", &url)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(3000)))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
     let response = client
-        .get(&url)
+        .get(url.clone())
         .send()
         .await
         .map_err(|e| format!("request to {url} failed: {e}"))?;
@@ -93,13 +164,14 @@ async fn http_get(url: String, timeout_ms: Option<u64>) -> Result<HttpResult, St
 /// one-shot request/response with no streaming.
 #[tauri::command]
 async fn http_post(url: String, body_json: String, timeout_ms: Option<u64>) -> Result<HttpResult, String> {
+    let url = parse_local_http_url("URL", &url)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000)))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
     let response = client
-        .post(&url)
+        .post(url.clone())
         .header("Content-Type", "application/json")
         .body(body_json)
         .send()
@@ -177,14 +249,18 @@ async fn ollama_chat(
 ) -> Result<String, String> {
     use futures_util::StreamExt;
 
+    let mut url = parse_local_http_url("Ollama base URL", &base_url)?;
+    url.set_path(&format!("{}/api/chat", url.path().trim_end_matches('/')));
+    url.set_query(None);
+    url.set_fragment(None);
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| format!("failed to build HTTP client: {e}"))?;
 
-    let url = format!("{}/api/chat", base_url.trim_end_matches('/'));
     let response = client
-        .post(&url)
+        .post(url.clone())
         .json(&OllamaChatRequest {
             model,
             messages,
@@ -252,6 +328,26 @@ async fn ollama_chat(
     Ok(full_reply)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::parse_local_http_url;
+
+    #[test]
+    fn accepts_local_service_urls() {
+        assert!(parse_local_http_url("URL", "http://localhost:11434/api/tags").is_ok());
+        assert!(parse_local_http_url("URL", "http://127.0.0.1:7860/sdapi/v1/options").is_ok());
+        assert!(parse_local_http_url("URL", "http://127.1.2.3:7860").is_ok());
+        assert!(parse_local_http_url("URL", "http://[::1]:11434").is_ok());
+    }
+
+    #[test]
+    fn rejects_remote_or_non_http_urls() {
+        assert!(parse_local_http_url("URL", "https://example.com").is_err());
+        assert!(parse_local_http_url("URL", "http://192.168.1.10:11434").is_err());
+        assert!(parse_local_http_url("URL", "file:///tmp/model").is_err());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -261,6 +357,7 @@ pub fn run() {
             read_text_file,
             write_text_file,
             write_binary_file,
+            list_directory,
             http_get,
             http_post,
             ollama_chat,

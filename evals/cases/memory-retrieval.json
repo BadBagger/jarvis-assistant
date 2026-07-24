@@ -1,0 +1,78 @@
+[
+  {
+    "id": "memory-retrieval-prefers-title-and-tags",
+    "suite": "memory_retrieval",
+    "mode": "deterministic",
+    "task": "Retrieve the most relevant local memory record by title and tag matches.",
+    "input": {
+      "query": "Jarvis output folder",
+      "limit": 2,
+      "now": "2026-07-23T12:00:00.000Z",
+      "records": [
+        {
+          "id": "memory-output-folder",
+          "type": "preference",
+          "title": "Jarvis output folder",
+          "content": "Generated documents and images should be saved to the configured local output folder.",
+          "tags": ["jarvis", "output"],
+          "source": {"kind": "manual", "label": "settings"},
+          "createdAt": "2026-07-22T12:00:00.000Z",
+          "updatedAt": "2026-07-22T12:00:00.000Z"
+        },
+        {
+          "id": "memory-chat-style",
+          "type": "preference",
+          "title": "Chat style",
+          "content": "Jarvis should answer concisely and avoid unsupported claims.",
+          "tags": ["chat"],
+          "source": {"kind": "manual", "label": "settings"},
+          "createdAt": "2026-07-20T12:00:00.000Z",
+          "updatedAt": "2026-07-20T12:00:00.000Z"
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_top_id": "memory-output-folder",
+      "expected_ids": ["memory-output-folder"],
+      "minimum_top_score": 8
+    }
+  },
+  {
+    "id": "memory-retrieval-type-filter",
+    "suite": "memory_retrieval",
+    "mode": "deterministic",
+    "task": "Respect memory type filters during retrieval.",
+    "input": {
+      "query": "approval before file changes",
+      "types": ["constraint"],
+      "limit": 3,
+      "now": "2026-07-23T12:00:00.000Z",
+      "records": [
+        {
+          "id": "memory-approval-constraint",
+          "type": "constraint",
+          "title": "Approval before file changes",
+          "content": "Ask for approval before dangerous or external tool execution.",
+          "tags": ["approval", "tools"],
+          "source": {"kind": "manual", "label": "policy"},
+          "createdAt": "2026-07-22T12:00:00.000Z",
+          "updatedAt": "2026-07-22T12:00:00.000Z"
+        },
+        {
+          "id": "memory-approval-note",
+          "type": "note",
+          "title": "Approval copy",
+          "content": "Button labels should be clear.",
+          "tags": ["approval"],
+          "source": {"kind": "manual", "label": "ux"},
+          "createdAt": "2026-07-23T10:00:00.000Z",
+          "updatedAt": "2026-07-23T10:00:00.000Z"
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_top_id": "memory-approval-constraint",
+      "expected_ids": ["memory-approval-constraint"]
+    }
+  }
+]

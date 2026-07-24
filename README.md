@@ -1,59 +1,61 @@
 # Jarvis Assistant
 
 A local-first, Tauri + React desktop assistant: chat, image scanning
-(vision), image generation, and document creation — all backed by models
+(vision), image generation, and document creation - all backed by models
 that run entirely on your own machine. No cloud AI API, no accounts, no
 usage limits beyond what your hardware can do.
 
 ## How it's wired
 
-- **Chat** — sends messages to a local [Ollama](https://ollama.com) server
+- **Chat** - sends messages to a local [Ollama](https://ollama.com) server
   (`/api/chat`, streamed). Model is configurable in Settings (default
   `llama3.1`).
-- **Image scanning** — attach an image in chat and it's sent to Ollama's
+- **Image scanning** - attach an image in chat and it's sent to Ollama's
   vision-capable model (default `llava`) alongside your prompt, using the
   same chat endpoint (Ollama takes images as base64 on the message).
-- **Image generation** — type `/imagine <description>` and it's sent to a
+- **Image generation** - type `/imagine <description>` and it's sent to a
   local Stable Diffusion WebUI-compatible server's `/sdapi/v1/txt2img`
   endpoint (works out of the box with
   [AUTOMATIC1111's WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
   launched with `--api`).
-- **Document creation** — any assistant text reply has a "Save as document"
+- **Document creation** - any assistant text reply has a "Save as document"
   button that builds a real `.docx` (via the `docx` npm package) and writes
   it to your configured output folder.
 
-Everything talks to `localhost`/`127.0.0.1` only — this app never binds a
-listening port and never calls out to the internet.
+Everything talks to `localhost`/`127.0.0.1`/`[::1]` only - this app never
+binds a listening port and never calls out to the internet.
 
-## Setup (on your own machine — this repo was scaffolded in a cloud dev
+## Setup (on your own machine - this repo was scaffolded in a cloud dev
 session that cannot run these services itself)
 
 1. Install [Ollama](https://ollama.com), then:
-   ```
+   ```powershell
    ollama pull llama3.1
    ollama pull llava
    ```
 2. Install
    [AUTOMATIC1111's Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
    and launch it with the `--api` flag (e.g. add `--api` to
-   `COMMANDLINE_ARGS` in `webui-user.bat`/`webui-user.sh`).
+   `COMMANDLINE_ARGS` in `webui-user.bat`).
 3. In this repo:
-   ```
-   npm install
-   npm run tauri dev
+   ```powershell
+   npm.cmd install
+   npm.cmd run tauri dev
    ```
 4. Open Settings in the app and confirm/adjust the base URLs, models, and
    output folder, then hit Save.
 
 ## Development
 
-```
-npm install
-npm run dev          # Vite dev server only (browser preview, no Tauri APIs)
-npm run tauri dev    # full desktop app with hot reload
-npm run typecheck    # tsc --noEmit
-npm run build        # tsc + vite build (frontend only)
-npm run tauri build  # full desktop app build
+```powershell
+npm.cmd install
+npm.cmd run dev          # Vite dev server only (browser preview, no Tauri APIs)
+npm.cmd run tauri dev    # full desktop app with hot reload
+npm.cmd run typecheck    # tsc --noEmit
+npm.cmd run build        # tsc + vite build (frontend only)
+npm.cmd test             # Vitest unit tests
+npm.cmd run eval         # offline deterministic eval harness
+npm.cmd run tauri build  # full desktop app build
 ```
 
 `cargo check` inside `src-tauri/` type-checks the Rust backend
@@ -61,17 +63,17 @@ independently.
 
 ## Fine-tuning your own chat model
 
-The app talks to whatever model Ollama serves under a given name — including
+The app talks to whatever model Ollama serves under a given name - including
 a model you've actually trained yourself. See `finetune/README.md` for a
 full LoRA/QLoRA fine-tuning pipeline: prepare your own conversation data,
 train a real custom adapter on an open base model, merge it, convert to
-GGUF, and register it with Ollama. Then just point Settings → Chat model at
+GGUF, and register it with Ollama. Then just point Settings -> Chat model at
 your new model's name. Needs a real GPU on your own machine; doesn't run in
 a cloud sandbox.
 
 ## Project layout
 
-```
+```text
 src/
   ollama/client.ts         streamOllamaChat() -- shared by both plain chat
                             and vision (image scanning); talks to Ollama's
@@ -105,7 +107,7 @@ src-tauri/src/lib.rs        Rust commands: app_data_dir, read/write_text_file,
 
 ## Known limitations
 
-- Chat history is in-memory only (cleared on restart) — no persisted
+- Chat history is in-memory only (cleared on restart) - no persisted
   conversation log yet.
 - Image generation uses AUTOMATIC1111/A1111-API-compatible servers only;
   a ComfyUI setup needs its own API-compatibility shim or a dedicated

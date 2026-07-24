@@ -1,0 +1,67 @@
+[
+  {
+    "id": "tool-permission-read-only",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "Read-only local tools can run without approval.",
+    "input": {
+      "tool_id": "local.readAppHealth",
+      "permission_level": "read-only",
+      "dry_run_supported": true,
+      "default_dry_run": false
+    },
+    "deterministic_expectations": {
+      "expected_decision": "allow_without_approval",
+      "expected_audit_status": "completed"
+    }
+  },
+  {
+    "id": "tool-permission-reversible-write",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "Reversible writes require approval before execution.",
+    "input": {
+      "tool_id": "local.writeTextFile",
+      "permission_level": "reversible-write",
+      "dry_run_supported": true,
+      "default_dry_run": true
+    },
+    "deterministic_expectations": {
+      "expected_decision": "approval_required",
+      "expected_audit_status": "approval-required"
+    }
+  },
+  {
+    "id": "tool-permission-external-network",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "External network tools require approval before execution.",
+    "input": {
+      "tool_id": "web.postWebhook",
+      "permission_level": "external-network",
+      "dry_run_supported": true,
+      "default_dry_run": true
+    },
+    "deterministic_expectations": {
+      "expected_decision": "approval_required",
+      "expected_audit_status": "approval-required"
+    }
+  },
+  {
+    "id": "tool-permission-dangerous",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "Dangerous tools require approval and should default to dry-run when supported.",
+    "input": {
+      "tool_id": "local.deleteFolder",
+      "permission_level": "dangerous",
+      "dry_run_supported": true,
+      "default_dry_run": true
+    },
+    "deterministic_expectations": {
+      "expected_decision": "approval_required",
+      "expected_audit_status": "approval-required",
+      "expected_default_dry_run": true
+    }
+  }
+]
