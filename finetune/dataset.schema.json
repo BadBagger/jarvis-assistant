@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local.jarvis/finetune/conversation.schema.json",
   "title": "Jarvis fine-tuning conversation record",
+  "description": "One cleaned chat-style training record. prepare_data.py additionally enforces assistant-last targets and assistant-not-first records.",
   "type": "object",
   "additionalProperties": false,
   "required": ["messages"],

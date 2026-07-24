@@ -21,6 +21,11 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainingArguments
 from trl import SFTTrainer
 
+try:
+    from .validation import validate_finetune_config
+except ImportError:
+    from validation import validate_finetune_config
+
 
 def load_config(path: str) -> tuple[dict, Path]:
     config_path = Path(path)
@@ -50,6 +55,8 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg, config_dir = load_config(args.config)
+    for warning in validate_finetune_config(cfg):
+        print(f"warning: {warning}")
     base_model = cfg["base_model"]
     data_cfg = cfg["data"]
     lora_cfg = cfg["lora"]

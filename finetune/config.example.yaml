@@ -19,11 +19,14 @@ data:
 
 lora:
   # r=8 or 16 is a good first pass for style/task tuning. Try 32 only after
-  # you have enough cleaned data and evals to justify the extra capacity.
+  # you have enough cleaned data and evals to justify the extra capacity. The
+  # guardrail checker rejects ranks above 64 for local prep.
   r: 16
-  # alpha is commonly 2x r.
+  # alpha is commonly 2x r. Keep it between r and 4*r unless you are testing a
+  # specific training recipe.
   alpha: 32
-  # Small dropout helps reduce overfit on small personal datasets.
+  # Small dropout helps reduce overfit on small personal datasets. Use
+  # 0.03-0.1 before experimenting outside that range.
   dropout: 0.05
   # These module names fit Qwen-style architectures. For another model family,
   # inspect the model modules and update this list before training.
@@ -31,7 +34,8 @@ lora:
 
 training:
   # One to three epochs is usually enough for a first local LoRA run. More
-  # epochs can overfit quickly if the dataset is small or repetitive.
+  # epochs can overfit quickly if the dataset is small or repetitive. The
+  # guardrail checker fails above 5 epochs.
   num_train_epochs: 3
   per_device_train_batch_size: 1
   # Effective batch size is per_device_train_batch_size * gradient_accumulation_steps.

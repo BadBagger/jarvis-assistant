@@ -106,6 +106,27 @@ Optional:
 See `dataset.schema.json` for a machine-readable schema and
 `data/example_conversations.jsonl` for practical examples.
 
+`prepare_data.py` enforces the same schema shape before it writes train/val
+files. It rejects unknown fields, empty content, assistant-first records, and
+records whose final message is not an assistant target. It also emits warnings
+for common secret-looking strings; warnings are not a sanitizer, so review the
+raw data yourself before committing or training on it.
+
+Good fine-tuning records look like edited target behavior, not raw transcripts:
+
+```json
+{"messages":[{"role":"system","content":"You are Jarvis, a helpful local assistant. Ask before external actions."},{"role":"user","content":"Send a text that I am running 10 minutes late."},{"role":"assistant","content":"I can draft it, but I need your approval before sending: \"Running about 10 minutes late. I will update you if that changes.\""}],"source":"handwritten-approval-example","tags":["approval","messaging"],"quality":"gold"}
+```
+
+Avoid records that only teach facts:
+
+```json
+{"messages":[{"role":"user","content":"My garage code is 1234. Remember it."},{"role":"assistant","content":"Stored."}],"source":"bad-example","quality":"draft"}
+```
+
+That belongs in neither fine-tuning nor memory as written. Remove the secret and
+keep only the durable behavior: Jarvis should refuse to store sensitive codes.
+
 ## Data cleaning and dedup
 
 Before splitting, review the raw data manually:
@@ -121,8 +142,12 @@ Before splitting, review the raw data manually:
 
 - trims and collapses whitespace inside message content
 - rejects unknown fields so schema drift is visible
+- validates every record against the Jarvis conversation contract
+- warns on common secret patterns so you can stop and scrub the source data
 - removes duplicate conversations using normalized, case-insensitive message text
 - shuffles with a fixed seed before splitting
+- checks that no normalized duplicate appears in both train and validation
+- can enforce minimum train/validation counts with `--min-train` and `--min-val`
 
 Run it:
 
@@ -139,6 +164,7 @@ Useful options:
 
 ```powershell
 python prepare_data.py .\data\my_conversations.raw.jsonl --out-dir .\data --val-fraction 0.15
+python prepare_data.py .\data\my_conversations.raw.jsonl --val-fraction 0.15 --min-train 100 --min-val 20
 python prepare_data.py .\data\my_conversations.raw.jsonl --no-clean
 python prepare_data.py .\data\my_conversations.raw.jsonl --no-dedupe
 python prepare_data.py .\data\my_conversations.raw.jsonl --val-fraction 0
@@ -146,6 +172,8 @@ python prepare_data.py .\data\my_conversations.raw.jsonl --val-fraction 0
 
 For small datasets, use at least 20-30 examples before trusting validation
 loss. The script keeps at least one training record when validation is enabled.
+If `--no-dedupe` is used, split-leakage checks still fail when the same
+normalized conversation lands in both train and validation.
 
 ## Configure LoRA/QLoRA
 
@@ -173,6 +201,17 @@ Start conservative:
   substitute for better examples.
 - `bf16`: true for Ampere/Ada/Lovelace-class NVIDIA GPUs. For older cards, set
   `bf16: false` and `fp16: true`.
+
+Run the guardrail check before training:
+
+```powershell
+python check_config.py --config .\config.yaml
+```
+
+The check does not load the model or touch the GPU. It fails early for risky or
+accidental settings such as extreme LoRA rank, both `bf16` and `fp16` enabled,
+oversized batches, invalid sequence lengths, or more than five local prep
+epochs. Treat warnings as deliberate experiments, not defaults.
 
 If you hit out-of-memory errors:
 
@@ -222,8 +261,15 @@ Create `finetune/output/Modelfile`:
 
 ```text
 FROM ./jarvis.gguf
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+{{ end }}{{ .Response }}"""
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
+PARAMETER num_ctx 2048
 ```
 
 Register it:
@@ -235,6 +281,26 @@ ollama run jarvis-custom
 ```
 
 Then open Jarvis Assistant -> Settings -> set Chat model to `jarvis-custom`.
+
+Keep the Ollama model name versioned when comparing adapters, for example
+`jarvis-custom-v1`, `jarvis-custom-v2`, and keep the previous model installed
+until evals show the new one is better. Match `PARAMETER num_ctx` to the
+sequence length you actually trained for; a much larger context window does not
+make the adapter understand long examples it never saw.
+
+## Lightweight checks
+
+These checks are safe on a CPU-only machine and do not start training:
+
+```powershell
+python -m compileall finetune
+python -m unittest finetune.test_validation
+python prepare_data.py .\data\example_conversations.jsonl --out-dir .\output\prep-check --val-fraction 0.2 --seed 42 --min-train 4 --min-val 1
+python check_config.py --config .\config.example.yaml
+```
+
+Use them before every real training run and again before committing fine-tuning
+workflow changes.
 
 ## Iteration loop
 
