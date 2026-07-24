@@ -120,5 +120,86 @@
       "expected_top_id": "memory-jarvis-release",
       "expected_ids": ["memory-jarvis-release"]
     }
+  },
+  {
+    "id": "memory-retrieval-prefers-strong-semantic-match-over-recency",
+    "suite": "memory_retrieval",
+    "mode": "deterministic",
+    "task": "Prefer a strong title and tag match over a merely recent weak match.",
+    "input": {
+      "query": "meeting transcript summary",
+      "limit": 2,
+      "now": "2026-07-23T12:00:00.000Z",
+      "records": [
+        {
+          "id": "memory-meeting-transcript",
+          "type": "conversation-summary",
+          "title": "Meeting transcript summary",
+          "content": "Summaries should keep action items and decisions separate.",
+          "tags": ["meeting", "transcript"],
+          "confidence": 0.9,
+          "source": {"kind": "chat", "label": "Jarvis chat"},
+          "createdAt": "2026-06-23T12:00:00.000Z",
+          "updatedAt": "2026-06-23T12:00:00.000Z"
+        },
+        {
+          "id": "memory-recent-summary-style",
+          "type": "conversation-summary",
+          "title": "Recent summary style",
+          "content": "Use short summaries when possible.",
+          "tags": ["summary"],
+          "confidence": 0.8,
+          "source": {"kind": "chat", "label": "Jarvis chat"},
+          "createdAt": "2026-07-23T10:00:00.000Z",
+          "updatedAt": "2026-07-23T10:00:00.000Z"
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_top_id": "memory-meeting-transcript",
+      "expected_ids": ["memory-meeting-transcript", "memory-recent-summary-style"],
+      "minimum_top_score": 12
+    }
+  },
+  {
+    "id": "memory-retrieval-global-records-still-available-in-project",
+    "suite": "memory_retrieval",
+    "mode": "deterministic",
+    "task": "Allow global user preferences to appear when a project-scoped query is active.",
+    "input": {
+      "query": "local first cloud approval",
+      "projectId": "jarvis",
+      "limit": 3,
+      "now": "2026-07-23T12:00:00.000Z",
+      "records": [
+        {
+          "id": "memory-global-local-first",
+          "type": "user-preference",
+          "title": "Local first cloud approval",
+          "content": "Prefer local processing and ask before sending private content to cloud tools.",
+          "tags": ["local-first", "cloud", "approval"],
+          "confidence": 0.95,
+          "source": {"kind": "manual", "label": "settings"},
+          "createdAt": "2026-07-22T12:00:00.000Z",
+          "updatedAt": "2026-07-22T12:00:00.000Z"
+        },
+        {
+          "id": "memory-other-cloud-plan",
+          "type": "project-summary",
+          "title": "Cloud approval plan",
+          "content": "A different project has separate cloud rollout details.",
+          "tags": ["cloud", "approval"],
+          "confidence": 0.95,
+          "project": {"id": "other", "name": "Other Project"},
+          "source": {"kind": "project", "label": "handoff"},
+          "createdAt": "2026-07-23T10:00:00.000Z",
+          "updatedAt": "2026-07-23T10:00:00.000Z"
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_top_id": "memory-global-local-first",
+      "expected_ids": ["memory-global-local-first"]
+    }
   }
 ]

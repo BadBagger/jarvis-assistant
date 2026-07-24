@@ -63,5 +63,39 @@
       "expected_audit_status": "approval-required",
       "expected_default_dry_run": true
     }
+  },
+  {
+    "id": "tool-permission-read-only-dry-run",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "Read-only inspection tools can still use dry-run audit status when configured that way.",
+    "input": {
+      "tool_id": "local.previewWorkspaceScan",
+      "permission_level": "read-only",
+      "dry_run_supported": true,
+      "default_dry_run": true
+    },
+    "deterministic_expectations": {
+      "expected_decision": "allow_without_approval",
+      "expected_audit_status": "dry-run",
+      "expected_default_dry_run": true
+    }
+  },
+  {
+    "id": "tool-permission-reversible-write-dry-run-default",
+    "suite": "tool_permission_decisions",
+    "mode": "deterministic",
+    "task": "Reversible write tools should default to dry-run while still requiring approval.",
+    "input": {
+      "tool_id": "local.organizeFiles",
+      "permission_level": "reversible-write",
+      "dry_run_supported": true,
+      "default_dry_run": true
+    },
+    "deterministic_expectations": {
+      "expected_decision": "approval_required",
+      "expected_audit_status": "approval-required",
+      "expected_default_dry_run": true
+    }
   }
 ]

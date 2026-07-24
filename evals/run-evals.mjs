@@ -7,6 +7,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const casesDir = path.join(__dirname, "cases");
 const requiredTopLevelFields = ["id", "suite", "mode", "task", "input", "deterministic_expectations"];
 const approvalRequiredPermissions = new Set(["reversible-write", "external-network", "dangerous"]);
+const useCaseCapabilities = {
+  chat: ["chat"],
+  coding: ["chat", "coding"],
+  vision: ["chat", "vision"],
+  "image-generation": ["image-generation"],
+  embeddings: ["embeddings"],
+  "long-context": ["chat", "long-context"],
+};
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -75,6 +83,28 @@ function retrieveMemory(input) {
     .slice(0, Math.max(1, input.limit ?? 6));
 }
 
+function selectModelRoute(input) {
+  const requiredCapabilities = useCaseCapabilities[input.use_case];
+  assert(requiredCapabilities, `unknown model route use case: ${input.use_case}`);
+
+  const enabledModels = input.models.filter((model) => model.enabled);
+  const match = enabledModels.find((model) => requiredCapabilities.every((capability) => model.capabilities.includes(capability)));
+
+  if (match) {
+    return { status: "selected", model: match };
+  }
+
+  if (enabledModels.length > 0) {
+    return {
+      status: "unsupported-capability",
+      requiredCapabilities,
+      enabledModelIds: enabledModels.map((model) => model.id),
+    };
+  }
+
+  return { status: "unavailable", requiredCapabilities, enabledModelIds: [] };
+}
+
 function validateCommon(testCase) {
   for (const field of requiredTopLevelFields) {
     assert(Object.hasOwn(testCase, field), `${testCase.id ?? "(missing id)"} missing ${field}`);
@@ -111,6 +141,16 @@ function assertExcludes(value, needles, caseId, label) {
 function runDeterministicChecks(testCase) {
   validateCommon(testCase);
   const expectations = testCase.deterministic_expectations;
+
+  if (testCase.suite === "chat_quality" || testCase.suite === "coding_help") {
+    const response = testCase.input.candidate_response;
+    assert(typeof response === "string" && response.length > 0, `${testCase.id} missing candidate response`);
+    assertIncludes(response, expectations.response_must_include, testCase.id, "candidate response");
+    assertExcludes(response, expectations.response_must_not_include, testCase.id, "candidate response");
+    if (expectations.max_response_words !== undefined) {
+      assert(tokenize(response).length <= expectations.max_response_words, `${testCase.id} candidate response is too long`);
+    }
+  }
 
   if (testCase.suite === "vision_prompt_handling" && expectations.image_base64_min_length !== undefined) {
     assertIncludes(testCase.input.prompt, expectations.prompt_must_include, testCase.id, "prompt");
@@ -156,11 +196,30 @@ function runDeterministicChecks(testCase) {
     const actualDecision = approvalRequiredPermissions.has(testCase.input.permission_level)
       ? "approval_required"
       : "allow_without_approval";
-    const actualAuditStatus = actualDecision === "approval_required" ? "approval-required" : "completed";
+    const actualAuditStatus =
+      actualDecision === "approval_required" ? "approval-required" : testCase.input.default_dry_run ? "dry-run" : "completed";
     assert(actualDecision === expectations.expected_decision, `${testCase.id} permission decision mismatch`);
     assert(actualAuditStatus === expectations.expected_audit_status, `${testCase.id} audit status mismatch`);
     if (expectations.expected_default_dry_run !== undefined) {
       assert(testCase.input.default_dry_run === expectations.expected_default_dry_run, `${testCase.id} default dry-run mismatch`);
+    }
+  }
+
+  if (testCase.suite === "model_routing_choices") {
+    const result = selectModelRoute(testCase.input);
+    assert(result.status === expectations.expected_status, `${testCase.id} model route status mismatch`);
+    if (expectations.expected_model_id !== undefined) {
+      assert(result.model?.id === expectations.expected_model_id, `${testCase.id} selected model mismatch`);
+    }
+    for (const capability of expectations.expected_required_capabilities ?? []) {
+      assert(result.requiredCapabilities?.includes(capability), `${testCase.id} missing required capability ${capability}`);
+    }
+    if (expectations.expected_local_only !== undefined) {
+      const isLocalOnly = result.model?.privacyLevel === "local-only";
+      assert(isLocalOnly === expectations.expected_local_only, `${testCase.id} local-only expectation mismatch`);
+    }
+    if (expectations.expected_requires_network !== undefined) {
+      assert(result.model?.requiresNetwork === expectations.expected_requires_network, `${testCase.id} network expectation mismatch`);
     }
   }
 }
@@ -195,36 +254,71 @@ async function main() {
   const results = [];
 
   for (const testCase of testCases) {
+    let deterministicPassed = false;
     try {
       runDeterministicChecks(testCase);
-      const modelScore = testCase.mode === "model_scored" ? await scorer.score(testCase) : { status: "not-applicable" };
-      results.push({ id: testCase.id, suite: testCase.suite, source: testCase._source, status: "passed", modelScore });
+      deterministicPassed = true;
     } catch (error) {
       results.push({
         id: testCase.id ?? "(missing id)",
         suite: testCase.suite ?? "(missing suite)",
         source: testCase._source,
-        status: "failed",
+        deterministicStatus: "failed",
         error: error instanceof Error ? error.message : String(error),
       });
+      continue;
     }
+
+    let modelScore = { status: "not-applicable" };
+    if (testCase.mode === "model_scored") {
+      try {
+        modelScore = await scorer.score(testCase);
+      } catch (error) {
+        modelScore = {
+          status: "error",
+          reason: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+
+    results.push({
+      id: testCase.id,
+      suite: testCase.suite,
+      source: testCase._source,
+      deterministicStatus: deterministicPassed ? "passed" : "failed",
+      modelScore,
+    });
   }
 
-  const failed = results.filter((result) => result.status === "failed");
+  const failed = results.filter((result) => result.deterministicStatus === "failed");
   const modelSkipped = results.filter((result) => result.modelScore?.status === "skipped").length;
+  const modelErrors = results.filter((result) => result.modelScore?.status === "error").length;
   const suites = new Set(results.map((result) => result.suite));
 
   for (const result of results) {
-    const suffix = result.modelScore?.status === "skipped" ? " (model score skipped)" : "";
-    console.log(`${result.status === "passed" ? "PASS" : "FAIL"} ${result.suite}/${result.id}${suffix}`);
+    const suffix =
+      result.modelScore?.status === "skipped"
+        ? " (model score skipped)"
+        : result.modelScore?.status === "error"
+          ? " (model score error, non-gating)"
+          : "";
+    console.log(`${result.deterministicStatus === "passed" ? "PASS" : "FAIL"} ${result.suite}/${result.id}${suffix}`);
     if (result.error) console.log(`  ${result.error}`);
+    if (result.modelScore?.status === "error") console.log(`  ${result.modelScore.reason}`);
   }
 
   console.log("");
-  console.log(`Suites: ${suites.size}`);
-  console.log(`Cases: ${results.length}`);
+  console.log("Summary");
+  console.log(`  Suites: ${suites.size}`);
+  console.log(`  Cases: ${results.length}`);
+  for (const suite of [...suites].sort()) {
+    const suiteResults = results.filter((result) => result.suite === suite);
+    const suiteFailures = suiteResults.filter((result) => result.deterministicStatus === "failed").length;
+    console.log(`  ${suite}: ${suiteResults.length} case(s), ${suiteFailures} deterministic failure(s)`);
+  }
   console.log(`Deterministic failures: ${failed.length}`);
   console.log(`Model-scored cases skipped: ${modelSkipped}`);
+  console.log(`Model-scored cases errored: ${modelErrors}`);
 
   if (failed.length > 0) {
     process.exitCode = 1;

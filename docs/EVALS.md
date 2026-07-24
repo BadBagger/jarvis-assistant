@@ -1,31 +1,44 @@
 # Jarvis Assistant Evals
 
-Jarvis has a small eval harness in `evals/` for regression checks that do not require Ollama, AUTOMATIC1111, Tauri, or network access.
+Jarvis has an offline eval harness in `evals/` for deterministic regression checks. It does not require Ollama, AUTOMATIC1111, Tauri, or network access.
 
-## What It Covers
+## Coverage
 
-- `chat_quality`: model-scored fixtures for concise, local-first assistant behavior.
-- `coding_help`: model-scored fixtures for grounded coding help.
-- `vision_prompt_handling`: deterministic prompt and image payload checks, plus a model-scored visibility case.
-- `image_generation_request_shaping`: deterministic checks for shaped `/imagine` payloads.
-- `memory_retrieval`: deterministic retrieval checks using the same keyword, title, tag, type-filter, and recency scoring shape as the app memory store.
-- `hallucination_checks`: deterministic response fixtures that must admit missing evidence.
-- `tool_permission_decisions`: deterministic checks for read-only, reversible-write, external-network, and dangerous tool policy.
+- `chat_quality`: concise, local-first, clarification-first response contracts.
+- `coding_help`: grounded diagnosis, narrow patching, and preserving local edits.
+- `vision_prompt_handling`: image bytes stay separate from prompts, visible content is not guessed, and screenshots are treated as inspection.
+- `image_generation_request_shaping`: bounded `/imagine` payloads, allowed dimensions, step limits, and safer prompt shaping.
+- `memory_retrieval`: title/tag ranking, type filtering, recency, confidence, global preferences, and project privacy boundaries.
+- `tool_permission_decisions`: approval gates for reversible-write, external-network, and dangerous tools, plus dry-run audit status.
+- `hallucination_checks`: responses must admit missing evidence, missing command output, missing documents, and stale routing context.
+- `model_routing_choices`: deterministic route selection for chat, coding, vision, image generation, embeddings, and unavailable routes.
 
-## Run
+## Windows Commands
+
+Run evals only:
 
 ```powershell
 npm.cmd run eval
 ```
 
-For a normal verification pass:
+Run the normal local verification set:
 
 ```powershell
+npm.cmd run eval
 npm.cmd run build
-npm.cmd run eval
+npm.cmd test
+Set-Location src-tauri
+cargo test
+Set-Location ..
 ```
 
-The current harness prints one line per case and exits non-zero if any deterministic check fails.
+If PowerShell blocks npm scripts, keep using `npm.cmd` as shown above.
+
+## Exit Behavior
+
+The runner prints one line per case and then a suite summary. It exits nonzero only when a deterministic check fails.
+
+`mode: "model_scored"` fixtures may still be added for future model-based judgment, but model scoring is currently skipped by `evals/adapters/modelScorer.mjs`. Skipped or errored model scoring is reported as non-gating so offline CI and local Windows runs remain deterministic.
 
 ## Adding Cases
 
@@ -42,18 +55,4 @@ Add `.json` or `.jsonl` files under `evals/cases/`. Each case must include:
 }
 ```
 
-Use `mode: "model_scored"` when the fixture needs a model quality judgment later. Model-scored cases still run deterministic schema checks now, then report the model score as skipped.
-
-## Model Scorer Adapter
-
-`evals/adapters/modelScorer.mjs` is intentionally a no-op adapter. A future scorer should keep the same `score(testCase)` method and return a structured result such as:
-
-```json
-{
-  "status": "scored",
-  "score": 4,
-  "reason": "Meets the local-first and groundedness rubric."
-}
-```
-
-Keep model scoring separate from deterministic checks so CI can continue running the harness offline.
+Prefer deterministic fixtures with explicit `candidate_response`, route metadata, or shaped payload expectations. Use `mode: "model_scored"` only when deterministic checks cannot express the quality bar.

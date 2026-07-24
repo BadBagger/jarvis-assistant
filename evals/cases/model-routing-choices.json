@@ -1,0 +1,180 @@
+[
+  {
+    "id": "model-routing-chat-prefers-local-chat",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Route normal chat to the enabled local chat model.",
+    "input": {
+      "use_case": "chat",
+      "models": [
+        {
+          "id": "ollama:chat",
+          "provider": "ollama",
+          "capabilities": ["chat", "long-context", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        },
+        {
+          "id": "automatic1111:image-generation",
+          "provider": "automatic1111",
+          "capabilities": ["image-generation", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "selected",
+      "expected_model_id": "ollama:chat",
+      "expected_local_only": true,
+      "expected_requires_network": false
+    }
+  },
+  {
+    "id": "model-routing-coding-requires-coding-capability",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Route coding help only to a model with chat and coding capabilities.",
+    "input": {
+      "use_case": "coding",
+      "models": [
+        {
+          "id": "ollama:chat",
+          "provider": "ollama",
+          "capabilities": ["chat", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        },
+        {
+          "id": "ollama:coder",
+          "provider": "ollama",
+          "capabilities": ["chat", "coding", "long-context", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "selected",
+      "expected_model_id": "ollama:coder",
+      "expected_local_only": true,
+      "expected_requires_network": false
+    }
+  },
+  {
+    "id": "model-routing-vision-requires-chat-and-vision",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Route image analysis to a vision-capable chat model.",
+    "input": {
+      "use_case": "vision",
+      "models": [
+        {
+          "id": "ollama:chat",
+          "provider": "ollama",
+          "capabilities": ["chat", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        },
+        {
+          "id": "ollama:vision",
+          "provider": "ollama",
+          "capabilities": ["chat", "vision", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "selected",
+      "expected_model_id": "ollama:vision",
+      "expected_local_only": true,
+      "expected_requires_network": false
+    }
+  },
+  {
+    "id": "model-routing-image-generation-stays-on-image-provider",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Route image generation to the image provider rather than a chat model.",
+    "input": {
+      "use_case": "image-generation",
+      "models": [
+        {
+          "id": "ollama:vision",
+          "provider": "ollama",
+          "capabilities": ["chat", "vision", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        },
+        {
+          "id": "automatic1111:image-generation",
+          "provider": "automatic1111",
+          "capabilities": ["image-generation", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "selected",
+      "expected_model_id": "automatic1111:image-generation",
+      "expected_local_only": true,
+      "expected_requires_network": false
+    }
+  },
+  {
+    "id": "model-routing-embeddings-unsupported-capability",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Report unsupported capability when enabled models exist but none can embed.",
+    "input": {
+      "use_case": "embeddings",
+      "models": [
+        {
+          "id": "ollama:chat",
+          "provider": "ollama",
+          "capabilities": ["chat", "local-only"],
+          "enabled": true,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "unsupported-capability",
+      "expected_required_capabilities": ["embeddings"]
+    }
+  },
+  {
+    "id": "model-routing-long-context-unavailable-with-no-enabled-models",
+    "suite": "model_routing_choices",
+    "mode": "deterministic",
+    "task": "Report unavailable when no enabled model exists for long-context work.",
+    "input": {
+      "use_case": "long-context",
+      "models": [
+        {
+          "id": "ollama:disabled",
+          "provider": "ollama",
+          "capabilities": ["chat", "long-context", "local-only"],
+          "enabled": false,
+          "privacyLevel": "local-only",
+          "requiresNetwork": false
+        }
+      ]
+    },
+    "deterministic_expectations": {
+      "expected_status": "unavailable",
+      "expected_required_capabilities": ["chat", "long-context"]
+    }
+  }
+]
