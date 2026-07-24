@@ -1,16 +1,28 @@
 # Jarvis Assistant Handoff
 
-Date: 2026-07-23
+Date: 2026-07-24
 
-## Setup
+## Project State
 
-Jarvis Assistant is a local-first Tauri 2 + React 19 desktop app. Install Node dependencies from the repo root:
+Jarvis Assistant is a local-first Tauri 2 + React 19 desktop app. It provides a
+workspace shell, chat through local Ollama, image scanning through local Ollama
+vision, `/imagine` image generation through a local AUTOMATIC1111-compatible
+API, local memory records, local task plans, manual artifact exports, settings
+health checks, and deterministic evals.
+
+Do not describe it as generally intelligent or autonomous. The app only does
+the implemented flows above, and it does not give a model unrestricted shell,
+filesystem, network, delete, overwrite, send, or background-control access.
+
+## Repository Setup
+
+From the repo root:
 
 ```powershell
 npm.cmd install
 ```
 
-Useful development commands:
+Useful commands:
 
 ```powershell
 npm.cmd run dev
@@ -19,18 +31,29 @@ npm.cmd run typecheck
 npm.cmd test
 npm.cmd run eval
 npm.cmd run build
+cd src-tauri
+cargo check
+cargo test
+cd ..
 npm.cmd run tauri build
 ```
 
-The app stores settings, plans, and memory JSON under the Tauri app data directory. Generated documents/images save to the configured output directory.
+The app stores settings, memory records, plans, artifact metadata, and other
+app JSON files under the Tauri app data directory. Generated documents and
+images save to the configured output directory.
 
-## Running Ollama
+## Ollama Setup
 
 Install Ollama, then pull the default chat and vision models:
 
 ```powershell
 ollama pull llama3.1
 ollama pull llava
+```
+
+Start Ollama if needed:
+
+```powershell
 ollama serve
 ```
 
@@ -40,62 +63,94 @@ Default Jarvis settings:
 - Chat model: `llama3.1`
 - Vision model: `llava`
 
-Settings health checks call `GET /api/tags` and report missing configured models.
+Settings health checks call `GET /api/tags`. A healthy Ollama process is not
+enough by itself; the configured model names should also appear in the returned
+tag list.
 
-## Running A1111
+## AUTOMATIC1111 API Setup
 
-Install AUTOMATIC1111 Stable Diffusion WebUI and launch it with API mode enabled:
+Install AUTOMATIC1111 Stable Diffusion WebUI and launch it with API mode:
 
 ```powershell
 .\webui-user.bat --api
 ```
 
-If using `webui-user.bat`, adding `--api` to `COMMANDLINE_ARGS` is usually cleaner. Default Jarvis image generation URL is:
+For repeated use, add `--api` to `COMMANDLINE_ARGS` in `webui-user.bat`.
+
+Default Jarvis image-generation base URL:
 
 ```text
 http://127.0.0.1:7860
 ```
 
-Jarvis checks `GET /sdapi/v1/options` and sends `/imagine` requests to `POST /sdapi/v1/txt2img` with a 512x512, 20-step default payload.
-
-## Backend Constraints
-
-- Local-only service URLs are enforced in both TypeScript validation and Rust commands.
-- Allowed hosts are `localhost`, `127.*`, and `[::1]` over `http://` or `https://`.
-- `http_get`, `http_post`, and `ollama_chat` reject remote hosts before making requests.
-- The app does not bind a listening port.
-- Generic Rust file commands still exist for app persistence and exports; they should not be exposed as model-callable tools without narrower path validation and approval.
-- Chat streaming uses Ollama newline-delimited JSON from `/api/chat` and emits `jarvis:chat-chunk` events by request ID.
-- Image generation currently supports A1111-compatible APIs only.
-- Memory and plans are JSON-backed first passes, not SQLite-backed durable databases.
-- Tool audit records are currently in-memory only.
+Jarvis checks `GET /sdapi/v1/options` and sends `/imagine` requests to
+`POST /sdapi/v1/txt2img` with a simple 512x512, 20-step default payload.
 
 ## Current Capabilities
 
-- Chat with a configured local Ollama model.
-- Vision/image scanning through a configured Ollama vision model.
-- `/imagine <prompt>` image generation through a local A1111-compatible endpoint.
-- Save assistant replies as `.docx`.
-- Save generated images to disk.
-- Settings screen with model/service configuration, backend health checks, output folder preview, tool registry preview, and in-memory audit preview.
-- Local memory records with create/edit/delete/search and keyword/recency retrieval injected into chat context.
-- Local planning workspace with task steps, notes, artifacts, result summaries, and explicit permission boundary text.
-- Model provider/routing layer for chat, vision, image generation, embeddings contracts, and future providers.
-- Offline eval harness with deterministic privacy, hallucination, memory, tool-permission, vision-prompt, image-shaping, chat-quality, and coding-help cases.
-- Fine-tuning preparation path under `finetune/`, including schema, data prep, training config, QLoRA training script, and merge/export script. No training job was started.
+- Combined Workspace view with embedded chat, model route status, output folder
+  counts, current plan summary, local memory count, and tool/audit preview.
+- Chat with a configured local Ollama model via streamed `/api/chat`.
+- Image scanning by attaching an image and sending its base64 data to the
+  configured Ollama vision model.
+- `/imagine <prompt>` image generation through a local A1111-compatible
+  txt2img endpoint.
+- Retry queue for failed chat, image-scan, and image-generation requests.
+- Save assistant text replies as `.md`, `.txt`, `.json`, or `.docx`.
+- Save generated images as `.png`.
+- Reveal saved artifacts in the output folder.
+- Settings screen for Ollama URL, chat model, vision model, image-generation
+  URL, output folder, service health, model routes, output folder preview, tool
+  approvals, and in-memory audit preview.
+- Local JSON memory records with create, edit, delete, import, export, search,
+  type filters, confidence, tags, source labels, and project scope.
+- Chat memory retrieval that injects matching local memories only when a query
+  matches them.
+- Local JSON planning workspace with plan status, steps, notes, artifact
+  references, result summaries, and explicit permission boundary text.
+- Model provider/routing layer for chat, vision, image generation, embeddings
+  contracts, and future provider descriptors.
+- Tool registry for current local UI tools, risk labels, and in-memory audit
+  records.
+- Offline eval harness for local-first/privacy behavior, hallucination
+  boundaries, memory retrieval, tool permissions, model routing, vision prompt
+  handling, image request shaping, chat quality, and coding-help behavior.
+- Fine-tuning preparation path under `finetune/`, including schema, data prep,
+  training config, QLoRA script, and merge/export script. No training job was
+  started in this pass.
+
+## Backend Constraints
+
+- Local service URLs are validated in TypeScript and Rust.
+- Allowed service hosts are `localhost`, `127.*`, and `[::1]` over `http://` or
+  `https://`.
+- `http_get`, `http_post`, and `ollama_chat` reject remote hosts before making
+  requests.
+- The app does not bind a listening port.
+- Generic Rust file commands still exist for app persistence and exports. They
+  should not be exposed as model-callable tools without narrower path
+  validation, explicit approval, and audit/undo behavior.
+- Chat streaming uses Ollama newline-delimited JSON from `/api/chat` and emits
+  `jarvis:chat-chunk` events by request ID.
+- Image generation currently supports A1111-compatible APIs only.
+- Tool audit records are currently in-memory only.
 
 ## Verification Results
 
-All verification below was run on 2026-07-24 from `C:\Users\KyleB\Documents\Codex\2026-07-22\here-s-the-plain-list-just\jarvis-assistant`.
+All verification below was run on 2026-07-24 from:
+
+```text
+C:\Users\KyleB\Documents\Codex\2026-07-22\here-s-the-plain-list-just\jarvis-assistant
+```
 
 | Command | Result | Notes |
 | --- | --- | --- |
 | `npm.cmd run typecheck` | Pass | `tsc --noEmit` completed cleanly. |
-| `npm.cmd test` | Pass | Vitest: 2 test files, 4 tests passed. Added URL validation and retry queue coverage. |
-| `npm.cmd run eval` | Pass | 7 suites, 16 cases, 0 deterministic failures, 5 model-scored cases skipped by design. |
-| `npm.cmd run build` | Pass | Vite production build completed. Warning: JS chunk is 586.86 kB after minification, above 500 kB advisory threshold. |
+| `npm.cmd test` | Pass | Vitest: 8 test files, 27 tests passed. |
+| `npm.cmd run eval` | Pass | 8 suites, 32 cases, 0 deterministic failures. |
+| `npm.cmd run build` | Pass | Vite production build completed. Warning: JS chunk is 609.84 kB after minification, above the 500 kB advisory threshold. |
 | `cargo check` in `src-tauri` | Pass | Rust dev profile check completed cleanly. |
-| `cargo test` in `src-tauri` | Pass | 2 Rust unit tests passed for local URL validation; binary/doc tests had 0 tests. |
+| `cargo test` in `src-tauri` | Pass | 5 Rust unit tests passed. |
 | `npm.cmd run tauri build` | Pass | Built release executable plus MSI and NSIS installers. |
 
 Build artifacts:
@@ -106,38 +161,59 @@ Build artifacts:
 
 Not verified in this pass:
 
-- Live Ollama chat/vision behavior against running local models.
-- Live A1111 image generation.
+- Live Ollama chat with `llama3.1`.
+- Live Ollama vision/image scanning with `llava`.
+- Live A1111 image generation through `/sdapi/v1/txt2img`.
 - Installed MSI/NSIS smoke test.
 - Fine-tuning dependencies or GPU training.
 
 ## Changes Made In Final Pass
 
-- Enforced localhost-only HTTP URL validation in `src-tauri/src/lib.rs`.
-- Added Rust tests for accepted local service URLs and rejected remote/non-HTTP URLs.
-- Enforced matching local URL validation in `src/shared/errors.ts`.
-- Added Vitest coverage in `src/shared/errors.test.ts`.
-- Updated `docs/JARVIS_AI_ROADMAP.md` so the HTTP-boundary risk is no longer stale.
-- Added this handoff.
+- Updated `README.md` with current setup, implemented capabilities, local
+  backend setup, limitations, verification results, and roadmap.
+- Updated this handoff with current verification counts, setup steps, current
+  capabilities, known limitations, and next priorities.
 
-## Remaining Risks
+No source-code fixes were required after the verification pass.
 
-- Tauri file commands can read/write caller-provided paths. Current UI uses them for app data and user-configured exports, but future model-directed tools need narrower Rust commands and path allowlists.
-- Chat history is still in-memory and clears on restart.
-- Memory retrieval is keyword/recency based; embeddings are stubbed.
-- Plans and memory use JSON files; concurrent writes and migrations are basic.
-- Tool audit is in-memory only and disappears on restart.
-- No mocked tests yet for Ollama stream parsing, image generation response parsing, DOCX output, settings persistence, or file-write failures.
-- No manual acceptance run was done with Ollama/A1111 running, so runtime service wiring still needs local smoke testing.
-- Production JS bundle triggers a Vite chunk-size warning; this is advisory but should be addressed before the app grows much more.
+## Known Limitations
 
-## Next Priorities
+- Chat history is in-memory only and clears on restart.
+- Memory, plans, and artifact metadata are JSON-backed first passes rather than
+  SQLite-backed durable stores with migrations and robust concurrent-write
+  handling.
+- Memory retrieval is keyword/recency based; embeddings are only a provider
+  hook at this stage.
+- Plans record user-visible task structure and local results; they do not
+  execute work autonomously.
+- Tool audit records are in-memory only and disappear on restart.
+- There are not yet mocked tests for Ollama stream parsing, image generation
+  response parsing, DOCX output, settings persistence, or file-write failures.
+- The production JS bundle triggers Vite's chunk-size warning. This is advisory
+  but should be addressed before the app grows much more.
+- No live backend acceptance run was done with Ollama/A1111 running.
+- No installer smoke test was done after the MSI/NSIS build.
 
-1. Run a live local smoke test with Ollama and A1111: chat, vision attach, `/imagine`, DOCX export, PNG export, missing-service errors.
-2. Persist chat threads/messages and restore the latest thread on launch.
-3. Replace broad file commands in any future assistant-action path with narrow, typed, path-scoped commands.
-4. Add durable SQLite storage for threads, artifacts, memories, indexed sources, retrieval chunks, and audit events.
-5. Add mocked tests for streaming chat, image generation parsing, document export, and settings persistence.
-6. Add local embeddings through Ollama and source-cited retrieval over selected folders.
-7. Add a remote-provider design only after explicit opt-in settings, host allowlists, and audit/consent flows are defined.
-8. Keep fine-tuning external until there is a reviewed dataset, stable eval baseline, GPU check, run monitoring, and model comparison report.
+## Next Roadmap
+
+1. Run live local acceptance with Ollama `llama3.1`, Ollama `llava`, and A1111:
+   chat, image attach, `/imagine`, DOCX export, PNG export, missing-service
+   errors, and invalid-output-folder errors.
+2. Persist chat threads and messages, including attachments metadata and saved
+   artifact links; restore the latest thread on launch.
+3. Move settings, threads, artifacts, memories, plans, indexed sources,
+   retrieval chunks, and audit events into SQLite with migrations.
+4. Add mocked tests for Ollama stream parsing, image generation response
+   parsing, DOCX generation, settings persistence, memory import/export, plan
+   persistence, and file-write failures.
+5. Add local embeddings through Ollama or another local provider, then build
+   source-cited retrieval over explicitly selected folders.
+6. Replace any future model-facing broad file/HTTP actions with narrow typed
+   Rust commands, approval gates, persistent audit records, and undo/versioning
+   where practical.
+7. Add image-generation controls for dimensions, steps, seed, model/checkpoint
+   metadata, and generation history.
+8. Add installer smoke checks: install MSI or NSIS, launch app, confirm app data
+   path, run health checks, export a small document, then uninstall cleanly.
+9. Keep fine-tuning external until there is a reviewed dataset, stable eval
+   baseline, GPU check, run monitoring, and model comparison report.
