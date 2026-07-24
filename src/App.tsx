@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 import { ChatPage } from "./chat/ChatPage";
+import { ImageStudioPage } from "./imagegen/ImageStudioPage";
 import { MemoryPage } from "./memory/MemoryPage";
 import { PlanningPage } from "./planning/PlanningPage";
 import { SettingsPage } from "./settings/SettingsPage";
@@ -8,7 +9,7 @@ import { loadSettings } from "./shared/persistence";
 import type { Settings } from "./shared/types";
 import { AssistantWorkspace } from "./workspace/AssistantWorkspace";
 
-type View = "workspace" | "chat" | "plans" | "memory" | "settings";
+type View = "workspace" | "chat" | "images" | "plans" | "memory" | "settings";
 
 function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -33,6 +34,9 @@ function App() {
           <button className={view === "chat" ? "active" : ""} onClick={() => setView("chat")}>
             Chat
           </button>
+          <button className={view === "images" ? "active" : ""} onClick={() => setView("images")}>
+            Images
+          </button>
           <button className={view === "plans" ? "active" : ""} onClick={() => setView("plans")}>
             Plans
           </button>
@@ -47,6 +51,7 @@ function App() {
       <main className="app-main">
         {view === "workspace" && <AssistantWorkspace settings={settings} onOpenView={setView} />}
         {view === "chat" && <ChatPage settings={settings} />}
+        {view === "images" && <ImageStudioPage settings={settings} />}
         {view === "plans" && <PlanningPage />}
         {view === "memory" && <MemoryPage />}
         {view === "settings" && <SettingsPage settings={settings} onSaved={setSettings} />}
