@@ -65,6 +65,7 @@ export class ToolRegistry {
       requestedAt,
       inputSummary: tool.summarizeInput(input),
     };
+    let approvedRequestId: string | undefined;
 
     if (shouldRequireApproval(tool.permissionLevel)) {
       const approvalRequestId = options.approval?.requestId ?? createId("approval");
@@ -91,6 +92,7 @@ export class ToolRegistry {
         await auditSink.append(auditRecord);
         return { auditRecord };
       }
+      approvedRequestId = approvalRequest.id;
     }
 
     if (dryRun && !tool.dryRun.supported) {
@@ -112,6 +114,7 @@ export class ToolRegistry {
         status,
         completedAt: context.now().toISOString(),
         resultSummary: tool.summarizeResult(result),
+        approvalRequestId: approvedRequestId,
       };
       await auditSink.append(auditRecord);
       return { result, auditRecord };
@@ -121,6 +124,7 @@ export class ToolRegistry {
         status: "failed",
         completedAt: context.now().toISOString(),
         error: describeError(error),
+        approvalRequestId: approvedRequestId,
       };
       await auditSink.append(auditRecord);
       return { auditRecord };
